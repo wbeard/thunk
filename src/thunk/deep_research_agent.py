@@ -77,7 +77,7 @@ class DeepResearchAgent:
         self.callbacks = callbacks
 
     def _synthesize_report_from_documents(
-        self, query: str, documents: List[Document], use_rag: bool = True
+        self, query: str, documents: List[Document], use_rag: bool = True, context: str = None
     ) -> str:
         """Helper method to synthesize a report from given documents"""
         # Try to use Vertex AI RAG for synthesis if enabled and corpus has content
@@ -90,24 +90,102 @@ class DeepResearchAgent:
                     self.callbacks.on_debug_message(
                         "Using Vertex AI RAG for enhanced report synthesis"
                     )
+                    # Create enhanced query that includes clarification context
+                    enhanced_query = query
+                    context_section = ""
+                    
+                    if context:
+                        enhanced_query = f"{query}\n\nCLARIFICATION CONTEXT:\n{context}"
+                        context_section = f"""
+                    CLARIFICATION CONTEXT PROVIDED:
+                    {context}
+                    
+                    IMPORTANT: Use this clarification context to focus your analysis on the specific aspects mentioned. The user has provided additional details about what they're looking for, so tailor your report accordingly."""
+
                     rag_prompt = f"""
-                    Based on the research corpus and the following query, provide a comprehensive research report: 
-                    {query}
+                    You are a senior research analyst tasked with creating an extensive, in-depth research report. Based on the comprehensive research corpus available and the following query, produce a detailed analytical report of at least 3,000-5,000 words:
 
-                    Structure your report with:
-                      1. Executive Summary (key findings)
-                      2. Main sections covering different aspects
-                      3. Supporting details with citations [1], [2], etc.
-                      4. Conclusion with key insights
+                    RESEARCH QUERY: {query}
+                    {context_section}
 
-                      Requirements:
-                      - Include citations in brackets [1], [2], etc. throughout the text
-                      - Provide balanced, objective analysis
-                      - Highlight key trends, statistics, and insights
-                      - Use clear section headings
-                      - Be comprehensive but well-organized
+                    REPORT STRUCTURE (Required sections with substantial content):
 
-                      Write in markdown format with proper headings."""
+                    # Research Report: [Title]
+
+                    **Query:** {query}
+                    **Generated:** [Current timestamp]
+                    **Methodology:** Comprehensive analysis using Vertex AI RAG corpus
+                    **Document Sources:** [Number] research documents analyzed
+
+                    ## 1. Executive Summary (400-600 words)
+                    - Synthesize the most critical findings and insights
+                    - Highlight key trends, developments, and implications
+                    - Present main conclusions and recommendations
+                    - Include quantitative data and statistics where available
+
+                    ## 2. Background & Context (600-800 words)
+                    - Provide comprehensive background on the topic
+                    - Explain the current landscape and key players
+                    - Discuss historical context and evolution
+                    - Identify driving forces and market dynamics
+
+                    ## 3. Current State Analysis (800-1000 words)
+                    - Detailed examination of current developments
+                    - Analysis of recent trends and patterns
+                    - Key statistics, metrics, and performance indicators
+                    - Comparison across different regions/sectors/approaches
+                    - Current challenges and opportunities
+
+                    ## 4. Key Findings & Insights (1000-1200 words)
+                    Break this into subsections covering:
+                    - Major discoveries or developments
+                    - Technological advances or innovations
+                    - Market trends and business implications
+                    - Regulatory and policy developments
+                    - Expert opinions and industry perspectives
+                    - Data analysis and statistical insights
+
+                    ## 5. Comparative Analysis (400-600 words)
+                    - Compare different approaches, solutions, or perspectives
+                    - Analyze advantages and disadvantages
+                    - Benchmark against industry standards or competitors
+                    - Regional or demographic comparisons
+
+                    ## 6. Future Outlook & Implications (600-800 words)
+                    - Predictions and forecasts based on current data
+                    - Potential future developments and scenarios
+                    - Long-term implications and consequences
+                    - Emerging opportunities and threats
+
+                    ## 7. Recommendations & Conclusions (400-600 words)
+                    - Strategic recommendations based on findings
+                    - Key takeaways for different stakeholders
+                    - Action items and next steps
+                    - Final synthesis of insights
+
+                    CRITICAL REQUIREMENTS:
+                    - TARGET LENGTH: 3,000-5,000 words minimum
+                    - Include detailed citations [1], [2], etc. throughout (at least 2-3 per major paragraph)
+                    - Provide specific examples, case studies, and data points
+                    - Use quantitative data wherever possible (percentages, numbers, dates)
+                    - Include direct quotes from sources when relevant
+                    - Maintain analytical depth - don't just summarize, but analyze and synthesize
+                    - Cross-reference multiple sources to validate claims
+                    - Identify patterns, contradictions, and knowledge gaps
+                    - Write with authority and confidence based on the research
+                    - Use professional, academic tone with clear, engaging prose
+                    - Include specific company names, research institutions, dates, and locations
+                    - Provide context for technical terms and industry jargon
+
+                    ANALYSIS DEPTH GUIDELINES:
+                    - For each major point, provide supporting evidence from multiple sources
+                    - Explain the significance and implications of findings
+                    - Connect findings to broader trends and contexts
+                    - Identify cause-and-effect relationships
+                    - Highlight areas of consensus and disagreement in the literature
+                    - Discuss limitations and uncertainties in the data
+
+                    Write in markdown format with clear headings and subheadings. Ensure every section meets the minimum word count guidelines to produce a comprehensive, publication-quality research report."""
 
                     final_report = self.rag_engine.generate_with_rag(rag_prompt)
                 else:
@@ -188,7 +266,7 @@ class DeepResearchAgent:
 
             # Synthesize report from existing documents
             complete_report = self._synthesize_report_from_documents(
-                query, unique_documents, use_rag
+                query, unique_documents, use_rag, context=None
             )
 
             logger.debug("Summary regeneration completed successfully")
@@ -218,7 +296,7 @@ class DeepResearchAgent:
             # Step 2: Check existing corpus first
             existing_docs = []
             try:
-                existing_docs = self.rag_engine.search_corpus(query, limit=5)
+                existing_docs = self.rag_engine.search_corpus(query, limit=20)
                 if existing_docs:
                     self.callbacks.on_existing_documents_found(len(existing_docs))
                     logger.debug(
@@ -276,7 +354,7 @@ class DeepResearchAgent:
 
             # Step 4: Synthesize final report using helper method
             complete_report = self._synthesize_report_from_documents(
-                query, all_documents
+                query, all_documents, use_rag=True, context=context
             )
 
             # Update statistics

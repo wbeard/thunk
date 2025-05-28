@@ -123,7 +123,7 @@ wheels = [
 
 [[package]]
 name = "google-cloud-aiplatform"
-version = "1.71.1"
+version = "1.94.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "docstring-parser" },
@@ -132,15 +132,17 @@ dependencies = [
     { name = "google-cloud-bigquery" },
     { name = "google-cloud-resource-manager" },
     { name = "google-cloud-storage" },
+    { name = "google-genai" },
     { name = "packaging" },
     { name = "proto-plus" },
     { name = "protobuf" },
     { name = "pydantic" },
     { name = "shapely" },
+    { name = "typing-extensions" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/ed/d6/3fbc064701c93c0bb76a54f8348e3389e6b9115aaffaae316f39d01e92bb/google-cloud-aiplatform-1.71.1.tar.gz", hash = "sha256:0013527e06853382ff0885898195bb7f3cf4a70eb7e5d53e4b1a28c8bd1775e2", size = 7491661 }
+sdist = { url = "https://files.pythonhosted.org/packages/3c/a1/72dc8524e5255ee79e4e153f500a9a03ece3ea1de61a0e59a6fb5ce36406/google_cloud_aiplatform-1.94.0.tar.gz", hash = "sha256:5429dfaa953eef90e48e16fb2a6be82f26c5d4a9a0e53178fcf6f837b528373e", size = 9150001 }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/c8/37/c87b883be064b6c015b91a26cc454d667c797e0d01a85c47ac73e8aa565e/google_cloud_aiplatform-1.71.1-py2.py3-none-any.whl", hash = "sha256:4cd49bbc7f8ad88b92029a090b834ebacf9efadc844226f1e74d015d68f69ef5", size = 6189637 },
+    { url = "https://files.pythonhosted.org/packages/cd/eb/663a100222b0b04141de5d0bac38e64d6248121c9989c72e165b9b1e9090/google_cloud_aiplatform-1.94.0-py2.py3-none-any.whl", hash = "sha256:cfb198d322133559c076677fbff5b51568ca7759f228c6fc5273e091c2752a41", size = 7636054 },
 ]
 
 [[package]]
@@ -602,24 +604,24 @@ wheels = [
 [[package]]
 name = "thunk"
 version = "0.1.0"
-source = { virtual = "." }
+source = { editable = "." }
 dependencies = [
     { name = "beautifulsoup4" },
+    { name = "google-cloud-aiplatform" },
     { name = "google-genai" },
     { name = "pypdf" },
     { name = "python-dotenv" },
     { name = "requests" },
-    { name = "vertexai" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "beautifulsoup4", specifier = ">=4.13.4" },
+    { name = "google-cloud-aiplatform", specifier = ">=1.94.0" },
     { name = "google-genai", specifier = ">=1.16.1" },
     { name = "pypdf", specifier = ">=5.5.0" },
     { name = "python-dotenv", specifier = ">=1.1.0" },
     { name = "requests", specifier = ">=2.32.3" },
-    { name = "vertexai", specifier = ">=1.71.1" },
 ]
 
 [[package]]
@@ -650,18 +652,6 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/8a/78/16493d9c386d8e60e442a35feac5e00f0913c0f4b7c217c11e8ec2ff53e0/urllib3-2.4.0.tar.gz", hash = "sha256:414bc6535b787febd7567804cc015fee39daab8ad86268f1310a9250697de466", size = 390672 }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/6b/11/cc635220681e93a0183390e26485430ca2c7b5f9d33b15c74c2861cb8091/urllib3-2.4.0-py3-none-any.whl", hash = "sha256:4e16665048960a0900c702d4a66415956a584919c03361cac9f1df5c5dd7e813", size = 128680 },
-]
-
-[[package]]
-name = "vertexai"
-version = "1.71.1"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "google-cloud-aiplatform" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/14/40/3de2395f98ea374e78234d9728d595aa0ad8bad4f2d77c59d9fc9492e7bc/vertexai-1.71.1.tar.gz", hash = "sha256:cd74fe42ea05bb155aff0a4c150fd3d8af74df399297560a09027fa85e1fdbd7", size = 9288 }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/1a/76/162f62df15ce89ffb7587bf68cf7f81c49c4a7f326a3737b07ffc5253e52/vertexai-1.71.1-py3-none-any.whl", hash = "sha256:86162d5fe18badc76044a0950c8cd8accc7a81c16d787adf7430db32881d6063", size = 7268 },
 ]
 
 [[package]]

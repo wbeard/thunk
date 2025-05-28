@@ -38,7 +38,7 @@ class ResearchPlan:
 class ResearchConfig:
     """Configuration for the research agent"""
 
-    def __init__(self):
+    def __init__(self, corpus_display_name: str = None):
         # Load from environment variables
         # self.gemini_api_key = os.getenv('GEMINI_API_KEY')
         self.serpapi_key = os.getenv("SERPAPI_KEY")
@@ -46,7 +46,7 @@ class ResearchConfig:
         # Vertex AI configuration
         self.project_id = os.getenv("GOOGLE_CLOUD_PROJECT")
         self.location = os.getenv("VERTEX_AI_LOCATION", "us-central1")
-        self.corpus_display_name = os.getenv("RAG_CORPUS_NAME", "research_corpus_6")
+        self.corpus_display_name = corpus_display_name or os.getenv("RAG_CORPUS_NAME")
         self.rag_model_name = os.getenv(
             "RAG_MODEL_NAME", "gemini-2.5-flash-preview-05-20"
         )
@@ -63,8 +63,10 @@ class ResearchConfig:
             missing.append("SERPAPI_KEY")
         if not self.project_id:
             missing.append("GOOGLE_CLOUD_PROJECT")
+        if not self.corpus_display_name:
+            missing.append("--corpus argument or RAG_CORPUS_NAME environment variable")
 
         if missing:
             raise ValueError(
-                f"Missing required environment variables: {', '.join(missing)}"
+                f"Missing required configuration: {', '.join(missing)}"
             )

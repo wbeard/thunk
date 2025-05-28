@@ -192,12 +192,7 @@ class ConsoleResearchCallbacks(ResearchCallbacks):
             self._debug_print(f"⚠️  Failed to fetch content from {title}")
 
     def on_summary_generated(self, title: str, summary_preview: str):
-        preview = (
-            summary_preview[:100] + "..."
-            if len(summary_preview) > 100
-            else summary_preview
-        )
-        self._print(f"🧑‍🔬  Generated summary: {preview}")
+        self._print(f"🧑‍🔬  Generated summary: {summary_preview}")
 
     def on_document_stored(self, doc_id: str, storage_type: str):
         if storage_type == "vertex_rag":

@@ -4,15 +4,15 @@ import tempfile
 from typing import List, Dict, Any, Optional
 from dataclasses import dataclass
 import vertexai
-from vertexai import rag
+from vertexai.preview import rag
 from vertexai.generative_models import GenerativeModel, Tool
 import vertexai.generative_models
+
 
 logger = logging.getLogger(__name__)
 
 logging.getLogger("google_genai.models").setLevel(logging.ERROR)
 logging.getLogger("httpx").setLevel(logging.ERROR)
-
 
 @dataclass
 class Document:
@@ -323,7 +323,7 @@ class VertexRagEngineAPI:
                 retrieval=rag.Retrieval(
                     source=rag.VertexRagStore(
                         rag_resources=[rag.RagResource(rag_corpus=self.corpus.name)],
-                        rag_retrieval_config=rag.RagRetrievalConfig(top_k=5),
+                        rag_retrieval_config=rag.RagRetrievalConfig(top_k=20),
                     ),
                 )
             )

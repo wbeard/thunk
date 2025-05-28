@@ -109,9 +109,9 @@ class CLIResearchCallbacks(ConsoleResearchCallbacks):
 class BasicResearchCLI:
     """Simple command-line research interface with Vertex AI RAG support"""
 
-    def __init__(self):
+    def __init__(self, corpus_display_name: str = None):
         self.agent = None
-        self.config = ResearchConfig()
+        self.config = ResearchConfig(corpus_display_name=corpus_display_name)
         self.callbacks = None
 
     def setup_agent(self, debug_mode: bool = False, quiet_mode: bool = False) -> bool:
@@ -152,7 +152,9 @@ class BasicResearchCLI:
                 print("  - SERPAPI_KEY")
                 print("  - GOOGLE_CLOUD_PROJECT")
                 print("  - VERTEX_AI_LOCATION (optional)")
-                print("  - RAG_CORPUS_NAME (optional)")
+                print("And provide the RAG corpus name via:")
+                print("  - --corpus argument (recommended)")
+                print("  - RAG_CORPUS_NAME environment variable")
                 print("\nAlso ensure Google Cloud authentication is set up:")
                 print("  gcloud auth application-default login")
             return False
@@ -544,6 +546,11 @@ def main():
         help="Don't use Vertex AI RAG for regeneration (use local synthesis only)",
     )
 
+    # RAG corpus configuration
+    parser.add_argument(
+        "--corpus", "-c", help="Name of the Vertex AI RAG corpus to use"
+    )
+
     # Debug options
     parser.add_argument(
         "--check-config", action="store_true", help="Check configuration and exit"
@@ -552,7 +559,7 @@ def main():
     args = parser.parse_args()
 
     # Initialize CLI
-    cli = BasicResearchCLI()
+    cli = BasicResearchCLI(corpus_display_name=args.corpus)
 
     # Check configuration only
     if args.check_config:
