@@ -17,15 +17,12 @@ from .deep_research_agent import (
     DeepResearchAgent,
 )
 from .types import ResearchConfig
-from .callbacks import (
-    ConsoleResearchCallbacks,
-)
 
 load_dotenv()
 
 
-class CLIResearchCallbacks(ConsoleResearchCallbacks):
-    """CLI-specific extension of console callbacks with session tracking"""
+class CLIEventSubscriber:
+    """Event subscriber for CLI that handles research agent events"""
 
     def __init__(
         self,
@@ -33,7 +30,8 @@ class CLIResearchCallbacks(ConsoleResearchCallbacks):
         quiet_mode: bool = False,
         show_full_report: bool = False,
     ):
-        super().__init__(debug_mode, quiet_mode)
+        self.debug_mode = debug_mode
+        self.quiet_mode = quiet_mode
         self.show_full_report = show_full_report
         self.session_stats = {
             "start_time": None,
@@ -42,15 +40,59 @@ class CLIResearchCallbacks(ConsoleResearchCallbacks):
             "documents_processed": 0,
             "errors": 0,
         }
-
+    
+    def _print(self, message: str):
+        """Print message if not in quiet mode"""
+        if not self.quiet_mode:
+            print(message)
+    
+    def _debug_print(self, message: str):
+        """Print debug message if debug mode is enabled"""
+        if self.debug_mode and not self.quiet_mode:
+            print(f"[DEBUG] {message}")
+    
+    def subscribe_to_agent(self, agent: DeepResearchAgent):
+        """Subscribe to all relevant events from the research agent"""
+        # Research lifecycle events
+        agent.subscribe('research_start', self.on_research_start)
+        agent.subscribe('research_complete', self.on_research_complete)
+        agent.subscribe('research_plan_created', self.on_research_plan_created)
+        agent.subscribe('research_step_start', self.on_research_step_start)
+        agent.subscribe('research_completeness_check', self.on_research_completeness_check)
+        
+        # Regeneration events
+        agent.subscribe('regeneration_start', self.on_regeneration_start)
+        agent.subscribe('regeneration_complete', self.on_regeneration_complete)
+        agent.subscribe('regeneration_documents_found', self.on_regeneration_documents_found)
+        
+        # Search and content events
+        agent.subscribe('search_start', self.on_search_start)
+        agent.subscribe('search_results_found', self.on_search_results_found)
+        agent.subscribe('search_no_results', self.on_search_no_results)
+        agent.subscribe('source_evaluation', self.on_source_evaluation)
+        agent.subscribe('content_fetch_start', self.on_content_fetch_start)
+        agent.subscribe('content_fetch_complete', self.on_content_fetch_complete)
+        agent.subscribe('summary_generated', self.on_summary_generated)
+        
+        # Document storage events
+        agent.subscribe('document_stored', self.on_document_stored)
+        agent.subscribe('existing_documents_found', self.on_existing_documents_found)
+        
+        # Synthesis events
+        agent.subscribe('synthesis_start', self.on_synthesis_start)
+        
+        # Error and debug events
+        agent.subscribe('error', self.on_error)
+        agent.subscribe('debug_message', self.on_debug_message)
+    
+    # Event handlers
     def on_research_start(self, query: str, context: Optional[str] = None):
         if self.session_stats["start_time"] is None:
             self.session_stats["start_time"] = time.time()
         self.session_stats["research_queries"] += 1
 
-        if not self.quiet_mode:
-            self._print(f"\n🔍 Starting research on: '{query}'")
-            self._print("=" * 60)
+        self._print(f"\n🔍 Starting research on: '{query}'")
+        self._print("=" * 60)
 
         if context:
             self._debug_print("Using clarification context for targeted research")
@@ -60,18 +102,75 @@ class CLIResearchCallbacks(ConsoleResearchCallbacks):
             self.session_stats["start_time"] = time.time()
         self.session_stats["regeneration_queries"] += 1
 
-        if not self.quiet_mode:
-            self._print(f"\n🔄 Regenerating summary for: '{query}'")
-            self._print("=" * 60)
-
+        self._print(f"\n🔄 Regenerating summary for: '{query}'")
+        self._print("=" * 60)
+    
+    def on_research_plan_created(self, research_plan, steps):
+        self._debug_print(f"Research plan created with {len(steps)} steps")
+        if self.debug_mode:
+            for i, step in enumerate(steps, 1):
+                self._debug_print(f"  Step {i}: {step}")
+    
+    def on_research_step_start(self, step_num: int, research_step: str):
+        self._debug_print(f"Executing step {step_num}: {research_step}")
+    
+    def on_research_completeness_check(self, is_sufficient: bool, next_focus: str):
+        if is_sufficient:
+            self._debug_print("Research deemed sufficient")
+        elif next_focus:
+            self._debug_print(f"Additional focus needed: {next_focus}")
+    
+    def on_regeneration_documents_found(self, vertex_count: int, local_count: int, unique_count: int):
+        self._debug_print(f"Found {vertex_count} Vertex AI docs, {local_count} local docs, {unique_count} unique")
+    
+    def on_search_start(self, query: str):
+        self._debug_print(f"Starting web search for: {query}")
+    
+    def on_search_results_found(self, count: int):
+        self._print(f"🔍 Found {count} search results")
+    
+    def on_search_no_results(self):
+        self._print("⚠️ No search results found")
+    
+    def on_source_evaluation(self, title: str, accepted: bool, score: float, reason: str):
+        if accepted:
+            self._debug_print(f"✅ Accepted: {title[:50]}... (score: {score:.2f})")
+        else:
+            self._debug_print(f"❌ Rejected: {title[:50]}... (score: {score:.2f}) - {reason}")
+    
+    def on_content_fetch_start(self, title: str, url: str):
+        self._debug_print(f"Fetching content from: {title[:50]}...")
+    
+    def on_content_fetch_complete(self, title: str, success: bool, content_length: int = 0):
+        if success:
+            self._print(f"📄 Processed: {title[:50]}... ({content_length} chars)")
+        else:
+            self._print(f"❌ Failed to fetch: {title[:50]}...")
+    
+    def on_summary_generated(self, title: str, summary: str):
+        self._debug_print(f"Generated summary for: {title[:50]}...")
+    
     def on_document_stored(self, doc_id: str, storage_type: str):
         self.session_stats["documents_processed"] += 1
-        super().on_document_stored(doc_id, storage_type)
-
+        if storage_type == "vertex_rag":
+            self._debug_print(f"📁 Stored in Vertex AI RAG: {doc_id}")
+        else:
+            self._debug_print(f"💾 Stored locally: {doc_id}")
+    
+    def on_existing_documents_found(self, count: int):
+        self._print(f"📚 Found {count} existing documents in corpus")
+    
+    def on_synthesis_start(self, doc_count: int, use_rag: bool):
+        rag_status = "with Vertex AI RAG" if use_rag else "without RAG"
+        self._print(f"📝 Synthesizing report from {doc_count} documents {rag_status}")
+    
     def on_error(self, error: Exception, context: str):
         self.session_stats["errors"] += 1
-        super().on_error(error, context)
-
+        self._print(f"❌ Error in {context}: {error}")
+    
+    def on_debug_message(self, message: str):
+        self._debug_print(message)
+    
     def on_research_complete(self, success: bool, error: Optional[Exception] = None):
         if success:
             duration = time.time() - (self.session_stats["start_time"] or time.time())
@@ -79,9 +178,7 @@ class CLIResearchCallbacks(ConsoleResearchCallbacks):
         else:
             self._print(f"\n❌ Research failed: {error}")
 
-    def on_regeneration_complete(
-        self, success: bool, error: Optional[Exception] = None
-    ):
+    def on_regeneration_complete(self, success: bool, error: Optional[Exception] = None):
         if success:
             duration = time.time() - (self.session_stats["start_time"] or time.time())
             self._print(f"\n✅ Summary regenerated in {duration:.1f} seconds")
@@ -112,7 +209,7 @@ class BasicResearchCLI:
     def __init__(self, corpus_display_name: str = None):
         self.agent = None
         self.config = ResearchConfig(corpus_display_name=corpus_display_name)
-        self.callbacks = None
+        self.event_subscriber = None
 
     def setup_agent(self, debug_mode: bool = False, quiet_mode: bool = False) -> bool:
         """Initialize the research agent with Vertex AI RAG"""
@@ -120,19 +217,21 @@ class BasicResearchCLI:
             if not quiet_mode:
                 print("🔧 Initializing research agent with Vertex AI RAG...")
 
-            # Create appropriate callbacks
-            self.callbacks = CLIResearchCallbacks(
+            # Create event subscriber
+            self.event_subscriber = CLIEventSubscriber(
                 debug_mode=debug_mode, quiet_mode=quiet_mode
             )
 
-            # Create agent with Vertex AI configuration and callbacks
+            # Create agent with Vertex AI configuration
             self.agent = DeepResearchAgent(
                 serpapi_key=self.config.serpapi_key,
                 project_id=self.config.project_id,
                 location=self.config.location,
                 corpus_display_name=self.config.corpus_display_name,
-                callbacks=self.callbacks,
             )
+            
+            # Subscribe to agent events
+            self.event_subscriber.subscribe_to_agent(self.agent)
 
             if not quiet_mode:
                 print("✅ Research agent initialized successfully")
@@ -473,9 +572,9 @@ class BasicResearchCLI:
             except Exception as e:
                 print(f"❌ Error: {e}")
 
-        # Display session summary using callbacks
-        if self.callbacks:
-            self.callbacks.display_session_summary()
+        # Display session summary using event subscriber
+        if self.event_subscriber:
+            self.event_subscriber.display_session_summary()
 
         print(
             f"\n👋 Interactive session ended. Completed {session_count} research queries."

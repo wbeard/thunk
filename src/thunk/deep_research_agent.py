@@ -1,19 +1,16 @@
 import asyncio
 import json
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Callable
 import logging
 from datetime import datetime
 import time
+from collections import defaultdict
 
 from .vertex_rag_engine import VertexRagEngineAPI
 from .types import SearchResult, Document
 from .gemini_llm import GeminiLLM
 from .content_fetcher import ContentFetcher
 from .web_search_agent import WebSearchAgent
-from .callbacks import (
-    ResearchCallbacks,
-    SilentResearchCallbacks,
-)
 
 logging.getLogger("google_genai.models").setLevel(logging.ERROR)
 logging.getLogger("httpx").setLevel(logging.ERROR)
@@ -32,7 +29,6 @@ class DeepResearchAgent:
         project_id: str,
         location: str = "us-central1",
         corpus_display_name: str = "research_corpus",
-        callbacks: Optional[ResearchCallbacks] = None,
     ):
         """
         Initialize the Deep Research Agent with Vertex AI RAG
@@ -42,7 +38,6 @@ class DeepResearchAgent:
             project_id: Google Cloud project ID
             location: Vertex AI location (default: us-central1)
             corpus_display_name: Name for the RAG corpus
-            callbacks: Optional callbacks for lifecycle events
         """
         self.llm = GeminiLLM(project_name=project_id, location=location)
         self.search_agent = WebSearchAgent(serpapi_key)
@@ -55,8 +50,8 @@ class DeepResearchAgent:
             corpus_display_name=corpus_display_name,
         )
 
-        # Initialize callbacks
-        self.callbacks = callbacks or SilentResearchCallbacks()
+        # Event system using Python primitives
+        self._event_handlers: Dict[str, List[Callable]] = defaultdict(list)
 
         self.corpus = []  # Local backup corpus
         self.iteration_count = 0
@@ -72,24 +67,35 @@ class DeepResearchAgent:
             "total_search_time": 0.0,
         }
 
-    def set_callbacks(self, callbacks: ResearchCallbacks):
-        """Update the callbacks instance"""
-        self.callbacks = callbacks
+    def subscribe(self, event_name: str, handler: Callable):
+        """Subscribe to an event with a handler function"""
+        self._event_handlers[event_name].append(handler)
+    
+    def unsubscribe(self, event_name: str, handler: Callable):
+        """Unsubscribe from an event"""
+        if handler in self._event_handlers[event_name]:
+            self._event_handlers[event_name].remove(handler)
+    
+    def _emit(self, event_name: str, *args, **kwargs):
+        """Emit an event to all subscribers"""
+        for handler in self._event_handlers[event_name]:
+            try:
+                handler(*args, **kwargs)
+            except Exception as e:
+                logger.error(f"Error in event handler for {event_name}: {e}")
 
     def _synthesize_report_from_documents(
         self, query: str, documents: List[Document], use_rag: bool = True, context: str = None
     ) -> str:
         """Helper method to synthesize a report from given documents"""
         # Try to use Vertex AI RAG for synthesis if enabled and corpus has content
-        self.callbacks.on_synthesis_start(len(documents), use_rag)
+        self._emit('synthesis_start', len(documents), use_rag)
 
         if use_rag:
             try:
                 corpus_summary = self.rag_engine.get_corpus_summary()
                 if corpus_summary.get("file_count", 0) > 0:
-                    self.callbacks.on_debug_message(
-                        "Using Vertex AI RAG for enhanced report synthesis"
-                    )
+                    self._emit('debug_message', "Using Vertex AI RAG for enhanced report synthesis")
                     # Create enhanced query that includes clarification context
                     enhanced_query = query
                     context_section = ""
@@ -215,7 +221,7 @@ class DeepResearchAgent:
         Returns:
             Generated report string
         """
-        self.callbacks.on_regeneration_start(query, use_rag)
+        self._emit('regeneration_start', query, use_rag)
         logger.debug(f"Regenerating summary for: {query}")
 
         try:
@@ -235,7 +241,7 @@ class DeepResearchAgent:
                     )
             except Exception as e:
                 logger.warning(f"Failed to search Vertex AI corpus: {e}")
-                self.callbacks.on_error(e, "vertex_corpus_search")
+                self._emit('error', e, "vertex_corpus_search")
 
             # Add local corpus documents
             if self.corpus:
@@ -247,7 +253,7 @@ class DeepResearchAgent:
             if not all_documents:
                 error_msg = "No documents found in corpus. Cannot regenerate summary."
                 logger.warning(error_msg)
-                self.callbacks.on_regeneration_complete(False, Exception(error_msg))
+                self._emit('regeneration_complete', False, Exception(error_msg))
                 return "No documents found in corpus. Please conduct research first before regenerating summary."
 
             # Remove duplicates based on URL
@@ -260,9 +266,7 @@ class DeepResearchAgent:
 
             unique_count = len(unique_documents)
             logger.debug(f"Using {unique_count} unique documents for regeneration")
-            self.callbacks.on_regeneration_documents_found(
-                vertex_count, local_count, unique_count
-            )
+            self._emit('regeneration_documents_found', vertex_count, local_count, unique_count)
 
             # Synthesize report from existing documents
             complete_report = self._synthesize_report_from_documents(
@@ -270,18 +274,18 @@ class DeepResearchAgent:
             )
 
             logger.debug("Summary regeneration completed successfully")
-            self.callbacks.on_regeneration_complete(True)
+            self._emit('regeneration_complete', True)
             return complete_report
 
         except Exception as e:
             logger.error(f"Summary regeneration failed: {e}")
-            self.callbacks.on_regeneration_complete(False, e)
+            self._emit('regeneration_complete', False, e)
             raise
 
     async def research_with_context(self, query: str, context: str = None) -> str:
         """Main research method with optional clarification context"""
         start_time = time.time()
-        self.callbacks.on_research_start(query, context)
+        self._emit('research_start', query, context)
         logger.debug(f"Starting research for: {query}")
         if context:
             logger.debug("Using clarification context for targeted research")
@@ -291,26 +295,26 @@ class DeepResearchAgent:
             research_plan = self.llm.plan_research(query, context)
             logger.debug(f"Research plan created with {len(research_plan.steps)} steps")
 
-            self.callbacks.on_research_plan_created(research_plan, research_plan.steps)
+            self._emit('research_plan_created', research_plan, research_plan.steps)
 
             # Step 2: Check existing corpus first
             existing_docs = []
             try:
                 existing_docs = self.rag_engine.search_corpus(query, limit=20)
                 if existing_docs:
-                    self.callbacks.on_existing_documents_found(len(existing_docs))
+                    self._emit('existing_documents_found', len(existing_docs))
                     logger.debug(
                         f"Found {len(existing_docs)} relevant documents in existing corpus"
                     )
             except Exception as e:
                 logger.warning(f"Failed to search existing corpus: {e}")
-                self.callbacks.on_error(e, "existing_corpus_search")
+                self._emit('error', e, "existing_corpus_search")
 
             # Step 3: Execute research plan
             all_documents = existing_docs.copy()
 
             for step_num, research_step in enumerate(research_plan.steps, 1):
-                self.callbacks.on_research_step_start(step_num, research_step)
+                self._emit('research_step_start', step_num, research_step)
                 logger.debug(f"Executing step {step_num}: {research_step}")
 
                 # Generate search queries for this step
@@ -327,7 +331,7 @@ class DeepResearchAgent:
                         await asyncio.sleep(1)
                     except Exception as e:
                         logger.error(f"Failed to process query '{query_text}': {e}")
-                        self.callbacks.on_error(e, f"query_processing: {query_text}")
+                        self._emit('error', e, f"query_processing: {query_text}")
                         self.stats["api_errors"] += 1
                         continue
 
@@ -337,7 +341,7 @@ class DeepResearchAgent:
                     query, summaries
                 )
 
-                self.callbacks.on_research_completeness_check(is_sufficient, next_focus)
+                self._emit('research_completeness_check', is_sufficient, next_focus)
 
                 if is_sufficient:
                     break
@@ -350,7 +354,7 @@ class DeepResearchAgent:
                         self.iteration_count += 1
                     except Exception as e:
                         logger.error(f"Failed focused search on '{next_focus}': {e}")
-                        self.callbacks.on_error(e, f"focused_search: {next_focus}")
+                        self._emit('error', e, f"focused_search: {next_focus}")
 
             # Step 4: Synthesize final report using helper method
             complete_report = self._synthesize_report_from_documents(
@@ -362,12 +366,12 @@ class DeepResearchAgent:
             self.stats["total_search_time"] += time.time() - start_time
 
             logger.debug("Research completed successfully")
-            self.callbacks.on_research_complete(True)
+            self._emit('research_complete', True)
             return complete_report
 
         except Exception as e:
             logger.error(f"Research failed: {e}")
-            self.callbacks.on_research_complete(False, e)
+            self._emit('research_complete', False, e)
             self.stats["api_errors"] += 1
             raise
 
@@ -387,7 +391,7 @@ class DeepResearchAgent:
             except Exception as e:
                 last_error = e
                 logger.error(f"Research attempt {attempt + 1} failed: {e}")
-                self.callbacks.on_error(e, f"research_attempt_{attempt + 1}")
+                self._emit('error', e, f"research_attempt_{attempt + 1}")
 
                 if attempt < max_retries - 1:
                     # Exponential backoff
@@ -403,16 +407,16 @@ class DeepResearchAgent:
         """Search, filter, fetch and analyze content for a specific query"""
         try:
             # Step 1: Web search
-            self.callbacks.on_search_start(query)
+            self._emit('search_start', query)
 
             search_results = self.search_agent.search(query)
 
             if not search_results:
-                self.callbacks.on_search_no_results()
+                self._emit('search_no_results')
                 logger.warning(f"No search results found for query: {query}")
                 return []
             else:
-                self.callbacks.on_search_results_found(len(search_results))
+                self._emit('search_results_found', len(search_results))
                 logger.debug(f"Found {len(search_results)} search results for: {query}")
 
             # Step 2: Filter and rank results
@@ -428,9 +432,7 @@ class DeepResearchAgent:
                         rating in ["HIGHLY_RELEVANT", "SOMEWHAT_RELEVANT"]
                         and score > 0.3
                     )
-                    self.callbacks.on_source_evaluation(
-                        result.title, accepted, score, reason
-                    )
+                    self._emit('source_evaluation', result.title, accepted, score, reason)
 
                     if accepted:
                         filtered_results.append(result)
@@ -443,7 +445,7 @@ class DeepResearchAgent:
                         )
                 except Exception as e:
                     logger.warning(f"Failed to evaluate source {result.url}: {e}")
-                    self.callbacks.on_error(e, f"source_evaluation: {result.url}")
+                    self._emit('error', e, f"source_evaluation: {result.url}")
                     continue
 
             # Sort by relevance score and take top 3
@@ -456,13 +458,11 @@ class DeepResearchAgent:
             documents = []
             for result in top_results:
                 try:
-                    self.callbacks.on_content_fetch_start(result.title, result.url)
+                    self._emit('content_fetch_start', result.title, result.url)
                     content = self.content_fetcher.fetch_content(result.url)
 
                     if content and len(content) > 100:  # Minimum content threshold
-                        self.callbacks.on_content_fetch_complete(
-                            result.title, True, len(content)
-                        )
+                        self._emit('content_fetch_complete', result.title, True, len(content))
 
                         # Generate summary
                         summary = self.llm.summarize_content(
@@ -475,7 +475,7 @@ class DeepResearchAgent:
                             )
                             continue
 
-                        self.callbacks.on_summary_generated(result.title, summary)
+                        self._emit('summary_generated', result.title, summary)
 
                         # Create document
                         doc = Document(
@@ -500,7 +500,7 @@ class DeepResearchAgent:
                         # Store in Vertex AI RAG engine
                         try:
                             stored_id = self.rag_engine.store_document(doc)
-                            self.callbacks.on_document_stored(stored_id, "vertex_rag")
+                            self._emit('document_stored', stored_id, "vertex_rag")
                             logger.debug(
                                 f"Stored document in Vertex AI RAG: {stored_id}"
                             )
@@ -508,23 +508,23 @@ class DeepResearchAgent:
                             logger.warning(
                                 f"Failed to store document in Vertex AI RAG: {e}"
                             )
-                            self.callbacks.on_error(e, f"vertex_rag_storage: {doc.id}")
+                            self._emit('error', e, f"vertex_rag_storage: {doc.id}")
 
                         # Store in local corpus as backup
                         self.corpus.append(doc)
-                        self.callbacks.on_document_stored(doc.id, "local")
+                        self._emit('document_stored', doc.id, "local")
                         self.stats["documents_collected"] += 1
 
                         logger.debug(f"Processed document: {result.title[:50]}...")
                     else:
-                        self.callbacks.on_content_fetch_complete(result.title, False)
+                        self._emit('content_fetch_complete', result.title, False)
                         logger.warning(f"Insufficient content from {result.url}")
                         self.stats["failed_fetches"] += 1
 
                 except Exception as e:
-                    self.callbacks.on_content_fetch_complete(result.title, False)
+                    self._emit('content_fetch_complete', result.title, False)
                     logger.error(f"Failed to process {result.url}: {e}")
-                    self.callbacks.on_error(e, f"content_processing: {result.url}")
+                    self._emit('error', e, f"content_processing: {result.url}")
                     self.stats["failed_fetches"] += 1
                     continue
 
@@ -532,7 +532,7 @@ class DeepResearchAgent:
 
         except Exception as e:
             logger.error(f"Search and analysis failed for query '{query}': {e}")
-            self.callbacks.on_error(e, f"search_and_analyze: {query}")
+            self._emit('error', e, f"search_and_analyze: {query}")
             return []
 
     def _generate_references(self, documents: List[Document]) -> str:
@@ -555,7 +555,7 @@ class DeepResearchAgent:
             vertex_summary = self.rag_engine.get_corpus_summary()
         except Exception as e:
             logger.warning(f"Failed to get Vertex AI corpus summary: {e}")
-            self.callbacks.on_error(e, "get_vertex_corpus_summary")
+            self._emit('error', e, "get_vertex_corpus_summary")
 
         # Local corpus summary
         local_summary = {
@@ -607,17 +607,17 @@ class DeepResearchAgent:
         """Clear the local corpus (Vertex AI corpus remains)"""
         self.corpus.clear()
         logger.debug("Local corpus cleared")
-        self.callbacks.on_debug_message("Local corpus cleared")
+        self._emit('debug_message', "Local corpus cleared")
 
     def delete_vertex_corpus(self):
         """Delete the Vertex AI RAG corpus (use with caution)"""
         try:
             self.rag_engine.delete_corpus()
             logger.debug("Vertex AI RAG corpus deleted")
-            self.callbacks.on_debug_message("Vertex AI RAG corpus deleted")
+            self._emit('debug_message', "Vertex AI RAG corpus deleted")
         except Exception as e:
             logger.error(f"Failed to delete Vertex AI corpus: {e}")
-            self.callbacks.on_error(e, "delete_vertex_corpus")
+            self._emit('error', e, "delete_vertex_corpus")
 
     def export_corpus(self, filepath: str):
         """Export local corpus to JSON file"""
@@ -640,10 +640,10 @@ class DeepResearchAgent:
                 json.dump(corpus_data, f, indent=2, ensure_ascii=False)
 
             logger.debug(f"Local corpus exported to {filepath}")
-            self.callbacks.on_debug_message(f"Local corpus exported to {filepath}")
+            self._emit('debug_message', f"Local corpus exported to {filepath}")
         except Exception as e:
             logger.error(f"Failed to export corpus: {e}")
-            self.callbacks.on_error(e, f"export_corpus: {filepath}")
+            self._emit('error', e, f"export_corpus: {filepath}")
 
     def set_debug_mode(self, enabled: bool):
         """Enable or disable debug mode"""
@@ -651,8 +651,8 @@ class DeepResearchAgent:
         if enabled:
             logging.getLogger().setLevel(logging.DEBUG)
             logger.debug("Debug mode enabled")
-            self.callbacks.on_debug_message("Debug mode enabled")
+            self._emit('debug_message', "Debug mode enabled")
         else:
             logging.getLogger().setLevel(logging.INFO)
             logger.debug("Debug mode disabled")
-            self.callbacks.on_debug_message("Debug mode disabled")
+            self._emit('debug_message', "Debug mode disabled")
