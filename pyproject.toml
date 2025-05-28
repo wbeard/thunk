@@ -1,0 +1,14 @@
+[project]
+name = "thunk"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "beautifulsoup4>=4.13.4",
+    "google-genai>=1.16.1",
+    "pypdf>=5.5.0",
+    "python-dotenv>=1.1.0",
+    "requests>=2.32.3",
+    "vertexai>=1.71.1",
+]
