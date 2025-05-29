@@ -29,6 +29,10 @@ class DeepResearchAgent:
         project_id: str,
         location: str = "us-central1",
         corpus_display_name: str = "research_corpus",
+        max_concurrent_searches: int = 10,
+        max_concurrent_fetches: int = 20,
+        search_delay: float = 0.1,
+        fetch_delay: float = 0.05,
     ):
         """
         Initialize the Deep Research Agent with Vertex AI RAG
@@ -38,6 +42,10 @@ class DeepResearchAgent:
             project_id: Google Cloud project ID
             location: Vertex AI location (default: us-central1)
             corpus_display_name: Name for the RAG corpus
+            max_concurrent_searches: Maximum concurrent search operations (default: 10)
+            max_concurrent_fetches: Maximum concurrent content fetch operations (default: 20)
+            search_delay: Delay between search operations in seconds (default: 0.1)
+            fetch_delay: Delay between fetch operations in seconds (default: 0.05)
         """
         self.llm = GeminiLLM(project_name=project_id, location=location)
         self.search_agent = WebSearchAgent(serpapi_key)
@@ -58,6 +66,16 @@ class DeepResearchAgent:
         self.max_retries = 3
         self.debug_mode = False
 
+        # Rate limiting configuration
+        self.max_concurrent_searches = max_concurrent_searches
+        self.max_concurrent_fetches = max_concurrent_fetches
+        self.search_delay = search_delay
+        self.fetch_delay = fetch_delay
+        
+        # Create semaphores for concurrency control
+        self._search_semaphore = asyncio.Semaphore(max_concurrent_searches)
+        self._fetch_semaphore = asyncio.Semaphore(max_concurrent_fetches)
+
         # Performance tracking
         self.stats = {
             "queries_processed": 0,
@@ -65,6 +83,12 @@ class DeepResearchAgent:
             "failed_fetches": 0,
             "api_errors": 0,
             "total_search_time": 0.0,
+            "parallel_search_time": 0.0,
+            "parallel_fetch_time": 0.0,
+            "concurrent_searches_executed": 0,
+            "concurrent_fetches_executed": 0,
+            "max_concurrent_searches_used": 0,
+            "max_concurrent_fetches_used": 0,
         }
 
     def subscribe(self, event_name: str, handler: Callable):
@@ -198,7 +222,6 @@ class DeepResearchAgent:
                     # Fallback to standard synthesis
                     final_report = self.llm.synthesize_final_report(query, documents)
             except Exception as e:
-                logger.warning(f"RAG synthesis failed, using standard method: {e}")
                 final_report = self.llm.synthesize_final_report(query, documents)
         else:
             # Use standard synthesis method
@@ -282,6 +305,70 @@ class DeepResearchAgent:
             self._emit('regeneration_complete', False, e)
             raise
 
+    async def _execute_focused_research(self, query: str, next_focus: str, all_documents: List[Document], current_iteration: int, max_iterations: int) -> List[Document]:
+        """Recursively execute focused research based on next_focus areas"""
+        if current_iteration >= max_iterations:
+            logger.debug(f"Reached maximum iterations ({max_iterations}), stopping focused research")
+            return all_documents
+        
+        try:
+            # Generate search queries from the next_focus area (similar to research steps)
+            focused_search_queries = self.llm.generate_search_queries(next_focus)
+            logger.debug(f"Generated {len(focused_search_queries)} focused search queries from: {next_focus}")
+            
+            # Execute focused search queries in parallel
+            search_tasks = [
+                self._search_and_analyze_with_semaphore(query_text, next_focus)
+                for query_text in focused_search_queries
+            ]
+            
+            parallel_search_start = time.time()
+            search_results = await asyncio.gather(*search_tasks, return_exceptions=True)
+            parallel_search_time = time.time() - parallel_search_start
+            
+            # Update performance metrics
+            self.stats["parallel_search_time"] += parallel_search_time
+            self.stats["concurrent_searches_executed"] += len(search_tasks)
+            self.stats["max_concurrent_searches_used"] = max(
+                self.stats["max_concurrent_searches_used"], len(search_tasks)
+            )
+            
+            # Process results and handle exceptions
+            for query_text, result in zip(focused_search_queries, search_results):
+                if isinstance(result, Exception):
+                    logger.error(f"Failed to process focused query '{query_text}': {result}")
+                    self._emit('error', result, f"focused_query_processing: {query_text}")
+                    self.stats["api_errors"] += 1
+                else:
+                    all_documents.extend(result)
+            
+            # Check if we need even more focused research
+            summaries = [doc.summary for doc in all_documents]
+            is_sufficient, next_next_focus = self.llm.assess_research_completeness(
+                query, summaries
+            )
+            
+            self._emit('focused_research_completeness_check', is_sufficient, next_next_focus, current_iteration)
+            
+            if is_sufficient:
+                logger.debug(f"Focused research complete after {current_iteration + 1} iterations")
+                return all_documents
+            elif next_next_focus:
+                # Recursive call for deeper focused research
+                logger.debug(f"Continuing focused research (iteration {current_iteration + 1}): {next_next_focus}")
+                return await self._execute_focused_research(
+                    query, next_next_focus, all_documents, current_iteration + 1, max_iterations
+                )
+            else:
+                # No more focus areas identified, stop here
+                logger.debug("No additional focus areas identified, stopping focused research")
+                return all_documents
+                
+        except Exception as e:
+            logger.error(f"Failed focused research iteration {current_iteration}: {e}")
+            self._emit('error', e, f"focused_research_iteration_{current_iteration}")
+            return all_documents
+
     async def research_with_context(self, query: str, context: str = None) -> str:
         """Main research method with optional clarification context"""
         start_time = time.time()
@@ -320,20 +407,32 @@ class DeepResearchAgent:
                 # Generate search queries for this step
                 search_queries = self.llm.generate_search_queries(research_step)
 
-                for query_text in search_queries:
-                    try:
-                        documents = await self._search_and_analyze(
-                            query_text, research_step
-                        )
-                        all_documents.extend(documents)
-
-                        # Brief pause between searches to respect rate limits
-                        await asyncio.sleep(1)
-                    except Exception as e:
-                        logger.error(f"Failed to process query '{query_text}': {e}")
-                        self._emit('error', e, f"query_processing: {query_text}")
+                # Process all search queries in parallel with rate limiting
+                search_tasks = [
+                    self._search_and_analyze_with_semaphore(query_text, research_step)
+                    for query_text in search_queries
+                ]
+                
+                # Track parallel search performance
+                parallel_search_start = time.time()
+                search_results = await asyncio.gather(*search_tasks, return_exceptions=True)
+                parallel_search_time = time.time() - parallel_search_start
+                
+                # Update performance metrics
+                self.stats["parallel_search_time"] += parallel_search_time
+                self.stats["concurrent_searches_executed"] += len(search_tasks)
+                self.stats["max_concurrent_searches_used"] = max(
+                    self.stats["max_concurrent_searches_used"], len(search_tasks)
+                )
+                
+                # Process results and handle exceptions
+                for query_text, result in zip(search_queries, search_results):
+                    if isinstance(result, Exception):
+                        logger.error(f"Failed to process query '{query_text}': {result}")
+                        self._emit('error', result, f"query_processing: {query_text}")
                         self.stats["api_errors"] += 1
-                        continue
+                    else:
+                        all_documents.extend(result)
 
                 # Check if we need more information
                 summaries = [doc.summary for doc in all_documents]
@@ -345,16 +444,12 @@ class DeepResearchAgent:
 
                 if is_sufficient:
                     break
-                elif next_focus and self.iteration_count < research_plan.max_iterations:
-                    try:
-                        focused_docs = await self._search_and_analyze(
-                            next_focus, next_focus
-                        )
-                        all_documents.extend(focused_docs)
-                        self.iteration_count += 1
-                    except Exception as e:
-                        logger.error(f"Failed focused search on '{next_focus}': {e}")
-                        self._emit('error', e, f"focused_search: {next_focus}")
+                elif next_focus:
+                    # Use recursive focused research instead of loop
+                    logger.debug(f"Starting focused research: {next_focus}")
+                    all_documents = await self._execute_focused_research(
+                        query, next_focus, all_documents, 0, research_plan.max_iterations
+                    )
 
             # Step 4: Synthesize final report using helper method
             complete_report = self._synthesize_report_from_documents(
@@ -403,6 +498,81 @@ class DeepResearchAgent:
 
         raise last_error
 
+    async def _search_and_analyze_with_semaphore(self, query: str, focus_area: str) -> List[Document]:
+        """Search and analyze with semaphore-based rate limiting"""
+        async with self._search_semaphore:
+            # Add delay for rate limiting
+            if self.search_delay > 0:
+                await asyncio.sleep(self.search_delay)
+            
+            return await self._search_and_analyze(query, focus_area)
+
+    async def _fetch_and_process_content(self, result, focus_area: str, corpus_offset: int) -> Optional[Document]:
+        """Fetch and process content for a single search result with rate limiting"""
+        async with self._fetch_semaphore:
+            # Add delay for rate limiting
+            if self.fetch_delay > 0:
+                await asyncio.sleep(self.fetch_delay)
+                
+            try:
+                self._emit('content_fetch_start', result.title, result.url)
+                
+                # Note: content_fetcher.fetch_content is not async, so we'll run it in executor
+                loop = asyncio.get_event_loop()
+                content = await loop.run_in_executor(None, self.content_fetcher.fetch_content, result.url)
+
+                if not content or len(content) <= 100:  # Minimum content threshold
+                    self._emit('content_fetch_complete', result.title, False)
+                    return None
+
+                self._emit('content_fetch_complete', result.title, True, len(content))
+
+                # Generate summary (also not async, run in executor)
+                summary = await loop.run_in_executor(
+                    None, self.llm.summarize_content, content, focus_area, result.title
+                )
+
+                if not summary:
+                    self._emit('generate_summary_failed', result.url)
+                    return None
+
+                self._emit('summary_generated', result.title, summary)
+
+                # Create document
+                doc = Document(
+                    id=f"doc_{corpus_offset + 1}",
+                    title=result.title,
+                    url=result.url,
+                    content=content,
+                    summary=summary,
+                    source_type="web",
+                    date_collected=datetime.now().isoformat(),
+                    relevance_score=result.relevance_score,
+                    metadata={
+                        "domain": result.domain,
+                        "search_rank": result.rank,
+                        "focus_area": focus_area,
+                        "content_length": len(content),
+                    },
+                )
+
+                # Store in Vertex AI RAG engine
+                try:
+                    stored_id = await loop.run_in_executor(None, self.rag_engine.store_document, doc)
+                    self._emit('document_stored', stored_id, "vertex_rag")
+                    logger.debug(f"Stored document in Vertex AI RAG: {stored_id}")
+                except Exception as e:
+                    logger.warning(f"Failed to store document in Vertex AI RAG: {e}")
+                    self._emit('error', e, f"vertex_rag_storage: {doc.id}")
+
+                logger.debug(f"Processed document: {result.title[:50]}...")
+                return doc
+
+            except Exception as e:
+                self._emit('content_fetch_complete', result.title, False)
+                logger.error(f"Failed to process {result.url}: {e}")
+                return None
+
     async def _search_and_analyze(self, query: str, focus_area: str) -> List[Document]:
         """Search, filter, fetch and analyze content for a specific query"""
         try:
@@ -413,10 +583,9 @@ class DeepResearchAgent:
 
             if not search_results:
                 self._emit('search_no_results')
-                logger.warning(f"No search results found for query: {query}")
                 return []
             else:
-                self._emit('search_results_found', len(search_results))
+                self._emit('search_results_found', len(search_results), query)
                 logger.debug(f"Found {len(search_results)} search results for: {query}")
 
             # Step 2: Filter and rank results
@@ -454,79 +623,38 @@ class DeepResearchAgent:
 
             logger.debug(f"Selected {len(top_results)} high-quality sources")
 
-            # Step 3: Fetch and analyze content
+            # Step 3: Fetch and analyze content in parallel
+            fetch_tasks = [
+                self._fetch_and_process_content(result, focus_area, len(self.corpus))
+                for result in top_results
+            ]
+            
+            # Track parallel fetch performance
+            parallel_fetch_start = time.time()
+            fetch_results = await asyncio.gather(*fetch_tasks, return_exceptions=True)
+            parallel_fetch_time = time.time() - parallel_fetch_start
+            
+            # Update performance metrics
+            self.stats["parallel_fetch_time"] += parallel_fetch_time
+            self.stats["concurrent_fetches_executed"] += len(fetch_tasks)
+            self.stats["max_concurrent_fetches_used"] = max(
+                self.stats["max_concurrent_fetches_used"], len(fetch_tasks)
+            )
+            
+            # Collect successful documents and update stats
             documents = []
-            for result in top_results:
-                try:
-                    self._emit('content_fetch_start', result.title, result.url)
-                    content = self.content_fetcher.fetch_content(result.url)
-
-                    if content and len(content) > 100:  # Minimum content threshold
-                        self._emit('content_fetch_complete', result.title, True, len(content))
-
-                        # Generate summary
-                        summary = self.llm.summarize_content(
-                            content, focus_area, result.title
-                        )
-
-                        if not summary:
-                            logger.warning(
-                                f"Failed to generate summary for {result.url}"
-                            )
-                            continue
-
-                        self._emit('summary_generated', result.title, summary)
-
-                        # Create document
-                        doc = Document(
-                            id=f"doc_{len(self.corpus) + len(documents) + 1}",
-                            title=result.title,
-                            url=result.url,
-                            content=content,
-                            summary=summary,
-                            source_type="web",
-                            date_collected=datetime.now().isoformat(),
-                            relevance_score=result.relevance_score,
-                            metadata={
-                                "domain": result.domain,
-                                "search_rank": result.rank,
-                                "focus_area": focus_area,
-                                "content_length": len(content),
-                            },
-                        )
-
-                        documents.append(doc)
-
-                        # Store in Vertex AI RAG engine
-                        try:
-                            stored_id = self.rag_engine.store_document(doc)
-                            self._emit('document_stored', stored_id, "vertex_rag")
-                            logger.debug(
-                                f"Stored document in Vertex AI RAG: {stored_id}"
-                            )
-                        except Exception as e:
-                            logger.warning(
-                                f"Failed to store document in Vertex AI RAG: {e}"
-                            )
-                            self._emit('error', e, f"vertex_rag_storage: {doc.id}")
-
-                        # Store in local corpus as backup
-                        self.corpus.append(doc)
-                        self._emit('document_stored', doc.id, "local")
-                        self.stats["documents_collected"] += 1
-
-                        logger.debug(f"Processed document: {result.title[:50]}...")
-                    else:
-                        self._emit('content_fetch_complete', result.title, False)
-                        logger.warning(f"Insufficient content from {result.url}")
-                        self.stats["failed_fetches"] += 1
-
-                except Exception as e:
-                    self._emit('content_fetch_complete', result.title, False)
-                    logger.error(f"Failed to process {result.url}: {e}")
-                    self._emit('error', e, f"content_processing: {result.url}")
+            for result, fetch_result in zip(top_results, fetch_results):
+                if isinstance(fetch_result, Exception):
+                    logger.error(f"Failed to process {result.url}: {fetch_result}")
+                    self._emit('error', fetch_result, f"content_processing: {result.url}")
                     self.stats["failed_fetches"] += 1
-                    continue
+                elif fetch_result is not None:
+                    documents.append(fetch_result)
+                    
+                    # Store in local corpus as backup
+                    self.corpus.append(fetch_result)
+                    self._emit('document_stored', fetch_result.id, "local")
+                    self.stats["documents_collected"] += 1
 
             return documents
 
@@ -592,6 +720,21 @@ class DeepResearchAgent:
 
     def get_performance_stats(self) -> Dict[str, Any]:
         """Get performance statistics"""
+        parallel_efficiency = {
+            "avg_parallel_search_time": self.stats["parallel_search_time"]
+            / max(1, self.stats["queries_processed"]),
+            "avg_parallel_fetch_time": self.stats["parallel_fetch_time"]
+            / max(1, self.stats["queries_processed"]),
+            "avg_concurrent_searches_per_operation": self.stats["concurrent_searches_executed"]
+            / max(1, self.stats["queries_processed"]),
+            "avg_concurrent_fetches_per_operation": self.stats["concurrent_fetches_executed"]
+            / max(1, self.stats["queries_processed"]),
+            "search_concurrency_utilization": self.stats["max_concurrent_searches_used"]
+            / max(1, self.max_concurrent_searches),
+            "fetch_concurrency_utilization": self.stats["max_concurrent_fetches_used"]
+            / max(1, self.max_concurrent_fetches),
+        }
+        
         return {
             **self.stats,
             "success_rate": self.stats["queries_processed"]
@@ -601,6 +744,7 @@ class DeepResearchAgent:
             "avg_search_time": self.stats["total_search_time"]
             / max(1, self.stats["queries_processed"]),
             "local_corpus_size": len(self.corpus),
+            **parallel_efficiency,
         }
 
     def clear_corpus(self):

@@ -6,11 +6,17 @@ readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
     "beautifulsoup4>=4.13.4",
+    "dotenv>=0.9.9",
     "google-cloud-aiplatform>=1.94.0",
     "google-genai>=1.16.1",
     "pypdf>=5.5.0",
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.24.0",
+    "pytest-mock>=3.12.0",
+    "pytermgui>=7.7.4",
     "python-dotenv>=1.1.0",
     "requests>=2.32.3",
+    "tqdm>=4.67.1",
 ]
 
 [project.scripts]
