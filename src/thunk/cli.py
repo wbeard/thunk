@@ -17,6 +17,7 @@ from .deep_research_agent import (
     DeepResearchAgent,
 )
 from .types import ResearchConfig
+from .state_logger import ResearchEventLogger
 
 load_dotenv()
 
@@ -126,8 +127,8 @@ class CLIEventSubscriber:
     def on_search_start(self, query: str):
         self._debug_print(f"Starting web search for: {query}")
     
-    def on_search_results_found(self, count: int):
-        self._print(f"🔍 Found {count} search results")
+    def on_search_results_found(self, count: int, query: str):
+        self._print(f"🔍 Found {count} search results for query {query}")
     
     def on_search_no_results(self):
         self._print("⚠️ No search results found")
@@ -210,6 +211,7 @@ class BasicResearchCLI:
         self.agent = None
         self.config = ResearchConfig(corpus_display_name=corpus_display_name)
         self.event_subscriber = None
+        self.logger_subscriber = None
 
     def setup_agent(self, debug_mode: bool = False, quiet_mode: bool = False) -> bool:
         """Initialize the research agent with Vertex AI RAG"""
@@ -217,9 +219,14 @@ class BasicResearchCLI:
             if not quiet_mode:
                 print("🔧 Initializing research agent with Vertex AI RAG...")
 
-            # Create event subscriber
+            # Create event subscribers
+            # Use structured logger for all events
+            self.logger_subscriber = ResearchEventLogger(
+                debug_mode=debug_mode
+            )
+            # Keep CLI subscriber for session stats only
             self.event_subscriber = CLIEventSubscriber(
-                debug_mode=debug_mode, quiet_mode=quiet_mode
+                debug_mode=debug_mode, quiet_mode=True
             )
 
             # Create agent with Vertex AI configuration
@@ -232,6 +239,8 @@ class BasicResearchCLI:
             
             # Subscribe to agent events
             self.event_subscriber.subscribe_to_agent(self.agent)
+            if self.logger_subscriber:
+                self.logger_subscriber.subscribe_to_agent(self.agent)
 
             if not quiet_mode:
                 print("✅ Research agent initialized successfully")
@@ -270,29 +279,29 @@ class BasicResearchCLI:
                 print("✅ Query is clear - proceeding with research")
                 return None
 
-            print(
-                f"\n📝 Found {len(questions)} aspects that could benefit from clarification:"
-            )
-            print("=" * 50)
+            # Use state-based logger if available
+            if self.logger_subscriber and hasattr(self.logger_subscriber, 'logger'):
+                self.logger_subscriber.logger.add_clarification_questions(questions)
+            else:
+                print(
+                    f"\n📝 Found {len(questions)} aspects that could benefit from clarification:"
+                )
+                print("=" * 50)
 
             responses = []
             for i, question in enumerate(questions, 1):
-                print(f"\n{i}. {question}")
+                if not (self.logger_subscriber and hasattr(self.logger_subscriber, 'logger')):
+                    print(f"\n{i}. {question}")
 
                 while True:
-                    response = input(
-                        "   Your answer (or 'skip' to leave unspecified): "
-                    ).strip()
-                    if response.lower() == "skip":
-                        responses.append(
-                            f"Q{i}: {question}\nA{i}: [No specific preference]"
-                        )
-                        break
-                    elif response:
+                    response = input("   Your answer: ").strip()
+                    if response:
+                        if self.logger_subscriber and hasattr(self.logger_subscriber, 'logger'):
+                            self.logger_subscriber.logger.add_clarification_response(question, response)
                         responses.append(f"Q{i}: {question}\nA{i}: {response}")
                         break
                     else:
-                        print("   Please provide an answer or type 'skip'")
+                        print("   Please provide an answer")
 
             # Format context
             context = f"""Original Query: {query}
@@ -310,14 +319,13 @@ class BasicResearchCLI:
             return None
 
     async def conduct_research(
-        self, query: str, save_report: bool = True, skip_clarification: bool = False
+        self, query: str, save_report: bool = True
     ) -> Optional[str]:
-        """Conduct research on the given query with optional clarification"""
+        """Conduct research on the given query with clarification"""
 
-        context = None
-        if not skip_clarification:
-            context = self.gather_clarifications(query)
+        context = self.gather_clarifications(query)
 
+        # Structured logging will handle all output automatically
         # The callbacks will handle all the progress reporting
         start_time = time.time()
 
@@ -353,11 +361,17 @@ class BasicResearchCLI:
         except Exception as e:
             print(f"❌ Research failed: {e}")
             return None
+        
+        finally:
+            # Logging is automatic, no cleanup needed
+            pass
 
     async def regenerate_summary(
         self, query: str, save_report: bool = True, use_rag: bool = True
     ) -> Optional[str]:
         """Regenerate summary from existing corpus without new research"""
+
+        # Structured logging will handle all output automatically
 
         start_time = time.time()
 
@@ -391,6 +405,10 @@ class BasicResearchCLI:
         except Exception as e:
             print(f"❌ Summary regeneration failed: {e}")
             return None
+        
+        finally:
+            # Logging is automatic, no cleanup needed
+            pass
 
     def save_report(
         self,
@@ -497,11 +515,10 @@ class BasicResearchCLI:
 
     async def interactive_mode(self, debug_mode: bool = False):
         """Run in interactive mode with clarification support"""
-        print("🔬 Deep Research Agent - Interactive Mode (Vertex AI RAG)")
+        print(f"🔬 Deep Research Agent - Interactive Mode (Vertex AI RAG)")
         print("=" * 60)
         print("Commands:")
         print("  <query>                    - Run research with clarification")
-        print("  skip-clarification <query> - Run research without clarification")
         print("  regenerate <query>         - Regenerate summary from existing corpus")
         print("  regenerate-no-rag <query>  - Regenerate without Vertex AI RAG")
         print("  corpus-info               - Show corpus information")
@@ -527,15 +544,11 @@ class BasicResearchCLI:
                     continue
 
                 # Check for different command types
-                skip_clarification = False
                 regenerate_mode = False
                 use_rag = True
                 query = user_input
 
-                if user_input.lower().startswith("skip-clarification "):
-                    skip_clarification = True
-                    query = user_input[19:].strip()  # Remove the prefix
-                elif user_input.lower().startswith("regenerate-no-rag "):
+                if user_input.lower().startswith("regenerate-no-rag "):
                     regenerate_mode = True
                     use_rag = False
                     query = user_input[18:].strip()  # Remove the prefix
@@ -555,9 +568,7 @@ class BasicResearchCLI:
                 if regenerate_mode:
                     result = await self.regenerate_summary(query, use_rag=use_rag)
                 else:
-                    result = await self.conduct_research(
-                        query, skip_clarification=skip_clarification
-                    )
+                    result = await self.conduct_research(query)
 
                 if result:
                     # Ask if user wants to see the report
@@ -650,6 +661,7 @@ def main():
         "--corpus", "-c", help="Name of the Vertex AI RAG corpus to use"
     )
 
+
     # Debug options
     parser.add_argument(
         "--check-config", action="store_true", help="Check configuration and exit"
@@ -671,7 +683,7 @@ def main():
             print(f"❌ Configuration has issues: {e}")
             return 1
 
-    # Setup agent with appropriate modes
+    # Setup agent
     if not cli.setup_agent(debug_mode=args.debug, quiet_mode=args.quiet):
         return 1
 

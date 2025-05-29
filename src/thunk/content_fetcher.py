@@ -34,7 +34,6 @@ class ContentFetcher:
                 return self._extract_html_text(response.text)
 
         except Exception as e:
-            logger.error(f"Failed to fetch content from {url}: {e}")
             return ""
 
     def _extract_html_text(self, html: str) -> str:

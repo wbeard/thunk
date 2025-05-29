@@ -8,5 +8,5 @@ wheels/
 
 # Virtual environments
 .venv
-research_I_want_to_be_on_the_cutting_edge_of_deep_research__20250527_213130.md
+research_*.md
 .env
