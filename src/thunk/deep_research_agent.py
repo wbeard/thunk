@@ -113,13 +113,14 @@ class DeepResearchAgent:
     ) -> str:
         """Helper method to synthesize a report from given documents"""
         # Try to use Vertex AI RAG for synthesis if enabled and corpus has content
-        self._emit('synthesis_start', len(documents), use_rag)
+        self._emit('synthesis_before', len(documents), use_rag)
 
         if use_rag:
             try:
                 corpus_summary = self.rag_engine.get_corpus_summary()
                 if corpus_summary.get("file_count", 0) > 0:
                     self._emit('debug_message', "Using Vertex AI RAG for enhanced report synthesis")
+                    self._emit('rag_synthesis_before', query)
                     # Create enhanced query that includes clarification context
                     enhanced_query = query
                     context_section = ""
@@ -218,6 +219,7 @@ class DeepResearchAgent:
                     Write in markdown format with clear headings and subheadings. Ensure every section meets the minimum word count guidelines to produce a comprehensive, publication-quality research report."""
 
                     final_report = self.rag_engine.generate_with_rag(rag_prompt)
+                    self._emit('rag_synthesis_after', query, True)
                 else:
                     # Fallback to standard synthesis
                     final_report = self.llm.synthesize_final_report(query, documents)
@@ -230,7 +232,8 @@ class DeepResearchAgent:
         # Add references
         references = self._generate_references(documents)
         complete_report = final_report + "\n\n" + references
-
+        
+        self._emit('synthesis_after', len(documents), use_rag, True)
         return complete_report
 
     async def regenerate_summary(self, query: str, use_rag: bool = True) -> str:
@@ -244,7 +247,7 @@ class DeepResearchAgent:
         Returns:
             Generated report string
         """
-        self._emit('regeneration_start', query, use_rag)
+        self._emit('regeneration_before', query, use_rag)
         logger.debug(f"Regenerating summary for: {query}")
 
         try:
@@ -276,7 +279,7 @@ class DeepResearchAgent:
             if not all_documents:
                 error_msg = "No documents found in corpus. Cannot regenerate summary."
                 logger.warning(error_msg)
-                self._emit('regeneration_complete', False, Exception(error_msg))
+                self._emit('regeneration_after', False, Exception(error_msg))
                 return "No documents found in corpus. Please conduct research first before regenerating summary."
 
             # Remove duplicates based on URL
@@ -289,7 +292,8 @@ class DeepResearchAgent:
 
             unique_count = len(unique_documents)
             logger.debug(f"Using {unique_count} unique documents for regeneration")
-            self._emit('regeneration_documents_found', vertex_count, local_count, unique_count)
+            self._emit('regeneration_documents_before', vertex_count, local_count)
+            self._emit('regeneration_documents_after', vertex_count, local_count, unique_count)
 
             # Synthesize report from existing documents
             complete_report = self._synthesize_report_from_documents(
@@ -297,12 +301,12 @@ class DeepResearchAgent:
             )
 
             logger.debug("Summary regeneration completed successfully")
-            self._emit('regeneration_complete', True)
+            self._emit('regeneration_after', True)
             return complete_report
 
         except Exception as e:
             logger.error(f"Summary regeneration failed: {e}")
-            self._emit('regeneration_complete', False, e)
+            self._emit('regeneration_after', False, e)
             raise
 
     async def _execute_focused_research(self, query: str, next_focus: str, all_documents: List[Document], current_iteration: int, max_iterations: int) -> List[Document]:
@@ -348,7 +352,8 @@ class DeepResearchAgent:
                 query, summaries
             )
             
-            self._emit('focused_research_completeness_check', is_sufficient, next_next_focus, current_iteration)
+            self._emit('focused_research_completeness_before', is_sufficient, next_next_focus, current_iteration)
+            self._emit('focused_research_completeness_after', is_sufficient, next_next_focus, current_iteration)
             
             if is_sufficient:
                 logger.debug(f"Focused research complete after {current_iteration + 1} iterations")
@@ -372,7 +377,7 @@ class DeepResearchAgent:
     async def research_with_context(self, query: str, context: str = None) -> str:
         """Main research method with optional clarification context"""
         start_time = time.time()
-        self._emit('research_start', query, context)
+        self._emit('research_before', query, context)
         logger.debug(f"Starting research for: {query}")
         if context:
             logger.debug("Using clarification context for targeted research")
@@ -382,14 +387,16 @@ class DeepResearchAgent:
             research_plan = self.llm.plan_research(query, context)
             logger.debug(f"Research plan created with {len(research_plan.steps)} steps")
 
-            self._emit('research_plan_created', research_plan, research_plan.steps)
+            self._emit('research_plan_before', research_plan.steps)
+            self._emit('research_plan_after', research_plan.steps)
 
             # Step 2: Check existing corpus first
             existing_docs = []
             try:
                 existing_docs = self.rag_engine.search_corpus(query, limit=20)
                 if existing_docs:
-                    self._emit('existing_documents_found', len(existing_docs))
+                    self._emit('existing_documents_before', len(existing_docs))
+                    self._emit('existing_documents_after', len(existing_docs))
                     logger.debug(
                         f"Found {len(existing_docs)} relevant documents in existing corpus"
                     )
@@ -401,7 +408,7 @@ class DeepResearchAgent:
             all_documents = existing_docs.copy()
 
             for step_num, research_step in enumerate(research_plan.steps, 1):
-                self._emit('research_step_start', step_num, research_step)
+                self._emit('research_step_before', step_num, research_step)
                 logger.debug(f"Executing step {step_num}: {research_step}")
 
                 # Generate search queries for this step
@@ -440,16 +447,21 @@ class DeepResearchAgent:
                     query, summaries
                 )
 
-                self._emit('research_completeness_check', is_sufficient, next_focus)
+                self._emit('research_completeness_before', is_sufficient, next_focus)
+                self._emit('research_completeness_after', is_sufficient, next_focus)
 
                 if is_sufficient:
                     break
                 elif next_focus:
                     # Use recursive focused research instead of loop
                     logger.debug(f"Starting focused research: {next_focus}")
+                    self._emit('focused_research_before', next_focus, 0, research_plan.max_iterations)
                     all_documents = await self._execute_focused_research(
                         query, next_focus, all_documents, 0, research_plan.max_iterations
                     )
+                    self._emit('focused_research_after', next_focus, len(all_documents))
+                
+                self._emit('research_step_after', step_num, research_step, len(all_documents))
 
             # Step 4: Synthesize final report using helper method
             complete_report = self._synthesize_report_from_documents(
@@ -461,12 +473,12 @@ class DeepResearchAgent:
             self.stats["total_search_time"] += time.time() - start_time
 
             logger.debug("Research completed successfully")
-            self._emit('research_complete', True)
+            self._emit('research_after', True)
             return complete_report
 
         except Exception as e:
             logger.error(f"Research failed: {e}")
-            self._emit('research_complete', False, e)
+            self._emit('research_after', False, e)
             self.stats["api_errors"] += 1
             raise
 
@@ -515,17 +527,17 @@ class DeepResearchAgent:
                 await asyncio.sleep(self.fetch_delay)
                 
             try:
-                self._emit('content_fetch_start', result.title, result.url)
+                self._emit('content_fetch_before', result.title, result.url)
                 
                 # Note: content_fetcher.fetch_content is not async, so we'll run it in executor
                 loop = asyncio.get_event_loop()
                 content = await loop.run_in_executor(None, self.content_fetcher.fetch_content, result.url)
 
                 if not content or len(content) <= 100:  # Minimum content threshold
-                    self._emit('content_fetch_complete', result.title, False)
+                    self._emit('content_fetch_after', result.title, False)
                     return None
 
-                self._emit('content_fetch_complete', result.title, True, len(content))
+                self._emit('content_fetch_after', result.title, True, len(content))
 
                 # Generate summary (also not async, run in executor)
                 summary = await loop.run_in_executor(
@@ -533,10 +545,11 @@ class DeepResearchAgent:
                 )
 
                 if not summary:
-                    self._emit('generate_summary_failed', result.url)
+                    self._emit('summary_generation_after', result.title, False)
                     return None
 
-                self._emit('summary_generated', result.title, summary)
+                self._emit('summary_generation_before', result.title)
+                self._emit('summary_generation_after', result.title, True, summary)
 
                 # Create document
                 doc = Document(
@@ -558,18 +571,20 @@ class DeepResearchAgent:
 
                 # Store in Vertex AI RAG engine
                 try:
+                    self._emit('document_storage_before', doc.id, "vertex_rag")
                     stored_id = await loop.run_in_executor(None, self.rag_engine.store_document, doc)
-                    self._emit('document_stored', stored_id, "vertex_rag")
+                    self._emit('document_storage_after', stored_id, "vertex_rag", True)
                     logger.debug(f"Stored document in Vertex AI RAG: {stored_id}")
                 except Exception as e:
                     logger.warning(f"Failed to store document in Vertex AI RAG: {e}")
+                    self._emit('document_storage_after', doc.id, "vertex_rag", False, e)
                     self._emit('error', e, f"vertex_rag_storage: {doc.id}")
 
                 logger.debug(f"Processed document: {result.title[:50]}...")
                 return doc
 
             except Exception as e:
-                self._emit('content_fetch_complete', result.title, False)
+                self._emit('content_fetch_after', result.title, False, 0, e)
                 logger.error(f"Failed to process {result.url}: {e}")
                 return None
 
@@ -577,15 +592,17 @@ class DeepResearchAgent:
         """Search, filter, fetch and analyze content for a specific query"""
         try:
             # Step 1: Web search
-            self._emit('search_start', query)
+            self._emit('search_before', query)
 
             search_results = self.search_agent.search(query)
 
             if not search_results:
                 self._emit('search_no_results')
+                self._emit('search_after', query, 0)
                 return []
             else:
                 self._emit('search_results_found', len(search_results), query)
+                self._emit('search_after', query, len(search_results))
                 logger.debug(f"Found {len(search_results)} search results for: {query}")
 
             # Step 2: Filter and rank results
@@ -601,7 +618,8 @@ class DeepResearchAgent:
                         rating in ["HIGHLY_RELEVANT", "SOMEWHAT_RELEVANT"]
                         and score > 0.3
                     )
-                    self._emit('source_evaluation', result.title, accepted, score, reason)
+                    self._emit('source_evaluation_before', result.title)
+                    self._emit('source_evaluation_after', result.title, accepted, score, reason)
 
                     if accepted:
                         filtered_results.append(result)
@@ -653,7 +671,7 @@ class DeepResearchAgent:
                     
                     # Store in local corpus as backup
                     self.corpus.append(fetch_result)
-                    self._emit('document_stored', fetch_result.id, "local")
+                    self._emit('document_storage_after', fetch_result.id, "local", True)
                     self.stats["documents_collected"] += 1
 
             return documents

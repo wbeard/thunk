@@ -86,111 +86,221 @@ class CLIEventSubscriber:
         agent.subscribe('error', self.on_error)
         agent.subscribe('debug_message', self.on_debug_message)
     
-    # Event handlers
-    def on_research_start(self, query: str, context: Optional[str] = None):
+    # Event handlers - Before events show current status
+    def on_research_before(self, query: str, context: Optional[str] = None):
         if self.session_stats["start_time"] is None:
             self.session_stats["start_time"] = time.time()
         self.session_stats["research_queries"] += 1
 
-        self._print(f"\n🔍 Starting research on: '{query}'")
+        self._print(f"\nStarting research on: '{query}'")
         self._print("=" * 60)
 
         if context:
             self._debug_print("Using clarification context for targeted research")
+        self._print("Status: Research starting...")
 
-    def on_regeneration_start(self, query: str, use_rag: bool):
+    def on_regeneration_before(self, query: str, use_rag: bool):
         if self.session_stats["start_time"] is None:
             self.session_stats["start_time"] = time.time()
         self.session_stats["regeneration_queries"] += 1
 
-        self._print(f"\n🔄 Regenerating summary for: '{query}'")
+        self._print(f"\nRegenerating summary for: '{query}'")
         self._print("=" * 60)
+        self._print("Status: Regeneration starting...")
     
-    def on_research_plan_created(self, research_plan, steps):
+    def on_research_plan_before(self, steps):
+        self._print("Status: Creating research plan...")
+    
+    def on_research_plan_after(self, steps):
         self._debug_print(f"Research plan created with {len(steps)} steps")
         if self.debug_mode:
             for i, step in enumerate(steps, 1):
                 self._debug_print(f"  Step {i}: {step}")
+        self._print("Status: Research plan ready")
     
-    def on_research_step_start(self, step_num: int, research_step: str):
+    def on_research_step_before(self, step_num: int, research_step: str):
         self._debug_print(f"Executing step {step_num}: {research_step}")
+        self._print(f"Status: Executing research step {step_num}...")
+        
+    def on_research_step_after(self, step_num: int, research_step: str, doc_count: int):
+        self._print(f"Status: Step {step_num} completed ({doc_count} documents collected)")
     
-    def on_research_completeness_check(self, is_sufficient: bool, next_focus: str):
+    def on_research_completeness_before(self, is_sufficient: bool, next_focus: str):
+        self._print("Status: Checking research completeness...")
+        
+    def on_research_completeness_after(self, is_sufficient: bool, next_focus: str):
         if is_sufficient:
             self._debug_print("Research deemed sufficient")
+            self._print("Status: Research complete, proceeding to synthesis")
         elif next_focus:
             self._debug_print(f"Additional focus needed: {next_focus}")
+            self._print(f"Status: Additional research needed on: {next_focus[:50]}...")
     
-    def on_regeneration_documents_found(self, vertex_count: int, local_count: int, unique_count: int):
+    def on_regeneration_documents_before(self, vertex_count: int, local_count: int):
+        self._print("Status: Searching for existing documents...")
+        
+    def on_regeneration_documents_after(self, vertex_count: int, local_count: int, unique_count: int):
         self._debug_print(f"Found {vertex_count} Vertex AI docs, {local_count} local docs, {unique_count} unique")
+        self._print(f"Status: Found {unique_count} documents for regeneration")
     
-    def on_search_start(self, query: str):
+    def on_search_before(self, query: str):
         self._debug_print(f"Starting web search for: {query}")
+        self._print(f"Status: Searching for '{query[:50]}...'")
+        
+    def on_search_after(self, query: str, result_count: int):
+        self._print(f"Status: Search completed ({result_count} results)")
     
     def on_search_results_found(self, count: int, query: str):
-        self._print(f"🔍 Found {count} search results for query {query}")
+        self._print(f"Found {count} search results for query {query}")
     
     def on_search_no_results(self):
-        self._print("⚠️ No search results found")
+        self._print("No search results found")
     
-    def on_source_evaluation(self, title: str, accepted: bool, score: float, reason: str):
+    def on_source_evaluation_before(self, title: str):
+        self._print(f"Status: Evaluating '{title[:30]}...'")
+        
+    def on_source_evaluation_after(self, title: str, accepted: bool, score: float, reason: str):
         if accepted:
-            self._debug_print(f"✅ Accepted: {title[:50]}... (score: {score:.2f})")
+            self._debug_print(f"Accepted: {title[:50]}... (score: {score:.2f})")
+            self._print(f"Status: Accepted source (score: {score:.2f})")
         else:
-            self._debug_print(f"❌ Rejected: {title[:50]}... (score: {score:.2f}) - {reason}")
+            self._debug_print(f"Rejected: {title[:50]}... (score: {score:.2f}) - {reason}")
     
-    def on_content_fetch_start(self, title: str, url: str):
+    def on_content_fetch_before(self, title: str, url: str):
         self._debug_print(f"Fetching content from: {title[:50]}...")
+        self._print(f"Status: Fetching '{title[:30]}...'")
     
-    def on_content_fetch_complete(self, title: str, success: bool, content_length: int = 0):
+    def on_content_fetch_after(self, title: str, success: bool, content_length: int = 0, error: Exception = None):
         if success:
-            self._print(f"📄 Processed: {title[:50]}... ({content_length} chars)")
+            self._print(f"Processed: {title[:50]}... ({content_length} chars)")
+            self._print("Status: Content fetched successfully")
         else:
-            self._print(f"❌ Failed to fetch: {title[:50]}...")
+            self._print(f"Failed to fetch: {title[:50]}...")
+            self._print(f"Status: Content fetch failed")
     
-    def on_summary_generated(self, title: str, summary: str):
-        self._debug_print(f"Generated summary for: {title[:50]}...")
-    
-    def on_document_stored(self, doc_id: str, storage_type: str):
-        self.session_stats["documents_processed"] += 1
-        if storage_type == "vertex_rag":
-            self._debug_print(f"📁 Stored in Vertex AI RAG: {doc_id}")
+    def on_summary_generation_before(self, title: str):
+        self._print(f"Status: Generating summary for '{title[:30]}...'")
+        
+    def on_summary_generation_after(self, title: str, success: bool, summary: str = ""):
+        if success:
+            self._debug_print(f"Generated summary for: {title[:50]}...")
+            self._print("Status: Summary generated")
         else:
-            self._debug_print(f"💾 Stored locally: {doc_id}")
+            self._print("Status: Summary generation failed")
     
-    def on_existing_documents_found(self, count: int):
-        self._print(f"📚 Found {count} existing documents in corpus")
+    def on_document_storage_before(self, doc_id: str, storage_type: str):
+        self._print(f"Status: Storing document ({storage_type})...")
+        
+    def on_document_storage_after(self, doc_id: str, storage_type: str, success: bool, error: Exception = None):
+        if success:
+            self.session_stats["documents_processed"] += 1
+            if storage_type == "vertex_rag":
+                self._debug_print(f"Stored in Vertex AI RAG: {doc_id}")
+            else:
+                self._debug_print(f"Stored locally: {doc_id}")
+            self._print(f"Status: Document stored ({storage_type})")
+        else:
+            self._print(f"Status: Document storage failed ({storage_type})")
     
-    def on_synthesis_start(self, doc_count: int, use_rag: bool):
+    def on_existing_documents_before(self, count: int):
+        self._print("Status: Searching existing corpus...")
+        
+    def on_existing_documents_after(self, count: int):
+        self._print(f"Found {count} existing documents in corpus")
+        self._print(f"Status: Corpus search completed ({count} docs)")
+    
+    def on_synthesis_before(self, doc_count: int, use_rag: bool):
         rag_status = "with Vertex AI RAG" if use_rag else "without RAG"
-        self._print(f"📝 Synthesizing report from {doc_count} documents {rag_status}")
+        self._print(f"Synthesizing report from {doc_count} documents {rag_status}")
+        self._print("Status: Starting report synthesis...")
+        
+    def on_synthesis_after(self, doc_count: int, use_rag: bool, success: bool):
+        if success:
+            self._print("Status: Report synthesis completed")
+        else:
+            self._print("Status: Report synthesis failed")
+    
+    def on_focused_research_before(self, focus_area: str, iteration: int, max_iterations: int):
+        self._print(f"Status: Starting focused research on '{focus_area[:40]}...' (iteration {iteration + 1}/{max_iterations})")
+        
+    def on_focused_research_after(self, focus_area: str, doc_count: int):
+        self._print(f"Status: Focused research completed ({doc_count} total documents)")
     
     def on_error(self, error: Exception, context: str):
         self.session_stats["errors"] += 1
-        self._print(f"❌ Error in {context}: {error}")
+        self._print(f"Error in {context}: {error}")
     
     def on_debug_message(self, message: str):
         self._debug_print(message)
     
-    def on_research_complete(self, success: bool, error: Optional[Exception] = None):
+    # Missing event handler methods
+    def on_research_start(self, query: str, context: str = None):
+        pass
+    
+    def on_research_complete(self, success: bool, result: str = None):
+        pass
+    
+    def on_research_plan_created(self, steps: list):
+        pass
+    
+    def on_research_step_start(self, step_num: int, research_step: str):
+        pass
+    
+    def on_research_completeness_check(self, is_sufficient: bool, next_focus: str = None):
+        pass
+    
+    def on_regeneration_start(self, query: str, use_rag: bool):
+        pass
+    
+    def on_regeneration_complete(self, success: bool, result: str = None):
+        pass
+    
+    def on_regeneration_documents_found(self, vertex_count: int, local_count: int, unique_count: int):
+        pass
+    
+    def on_search_start(self, query: str):
+        pass
+    
+    def on_source_evaluation(self, title: str, accepted: bool, score: float, reason: str):
+        pass
+    
+    def on_content_fetch_start(self, title: str, url: str):
+        pass
+    
+    def on_content_fetch_complete(self, title: str, success: bool, content_length: int = 0, error: Exception = None):
+        pass
+    
+    def on_summary_generated(self, title: str, success: bool, summary: str = ""):
+        pass
+    
+    def on_document_stored(self, doc_id: str, storage_type: str, success: bool, error: Exception = None):
+        pass
+    
+    def on_existing_documents_found(self, count: int):
+        pass
+    
+    def on_synthesis_start(self, doc_count: int, use_rag: bool):
+        pass
+    
+    def on_research_after(self, success: bool, error: Optional[Exception] = None):
         if success:
             duration = time.time() - (self.session_stats["start_time"] or time.time())
-            self._print(f"\n✅ Research completed in {duration:.1f} seconds")
+            self._print(f"\nResearch completed in {duration:.1f} seconds")
         else:
-            self._print(f"\n❌ Research failed: {error}")
+            self._print(f"\nResearch failed: {error}")
 
-    def on_regeneration_complete(self, success: bool, error: Optional[Exception] = None):
+    def on_regeneration_after(self, success: bool, error: Optional[Exception] = None):
         if success:
             duration = time.time() - (self.session_stats["start_time"] or time.time())
-            self._print(f"\n✅ Summary regenerated in {duration:.1f} seconds")
+            self._print(f"\nSummary regenerated in {duration:.1f} seconds")
         else:
-            self._print(f"\n❌ Summary regeneration failed: {error}")
+            self._print(f"\nSummary regeneration failed: {error}")
 
     def display_session_summary(self):
         """Display summary of the current session"""
         if self.session_stats["start_time"]:
             total_time = time.time() - self.session_stats["start_time"]
-            self._print("\n📊 Session Summary:")
+            self._print("\nSession Summary:")
             self._print(f"   Duration: {total_time:.1f} seconds")
             self._print(
                 f"   Research queries: {self.session_stats['research_queries']}"
@@ -224,9 +334,9 @@ class BasicResearchCLI:
             self.logger_subscriber = ResearchEventLogger(
                 debug_mode=debug_mode
             )
-            # Keep CLI subscriber for session stats only
+            # Keep CLI subscriber for session stats and status updates
             self.event_subscriber = CLIEventSubscriber(
-                debug_mode=debug_mode, quiet_mode=True
+                debug_mode=debug_mode, quiet_mode=quiet_mode
             )
 
             # Create agent with Vertex AI configuration
@@ -243,7 +353,7 @@ class BasicResearchCLI:
                 self.logger_subscriber.subscribe_to_agent(self.agent)
 
             if not quiet_mode:
-                print("✅ Research agent initialized successfully")
+                print("Research agent initialized successfully")
                 print(
                     f"📁 Using Vertex AI RAG corpus: {self.config.corpus_display_name}"
                 )
@@ -253,7 +363,7 @@ class BasicResearchCLI:
             return True
 
         except Exception as e:
-            print(f"❌ Failed to initialize agent: {e}")
+            print(f"Failed to initialize agent: {e}")
             if not quiet_mode:
                 print("Check your environment variables:")
                 print("  - GEMINI_API_KEY")
@@ -269,14 +379,14 @@ class BasicResearchCLI:
 
     def gather_clarifications(self, query: str) -> Optional[str]:
         """Gather clarifying information from the user"""
-        print("\n🤔 Analyzing query for clarification needs...")
+        print("\nAnalyzing query for clarification needs...")
 
         try:
             # Generate clarifying questions
             questions = self.agent.llm.generate_clarifying_questions(query)
 
             if not questions:
-                print("✅ Query is clear - proceeding with research")
+                print("Query is clear - proceeding with research")
                 return None
 
             # Use state-based logger if available
@@ -284,7 +394,7 @@ class BasicResearchCLI:
                 self.logger_subscriber.logger.add_clarification_questions(questions)
             else:
                 print(
-                    f"\n📝 Found {len(questions)} aspects that could benefit from clarification:"
+                    f"\nFound {len(questions)} aspects that could benefit from clarification:"
                 )
                 print("=" * 50)
 
@@ -343,23 +453,23 @@ class BasicResearchCLI:
             vertex_info = corpus_summary.get("vertex_ai_rag", {})
             local_info = corpus_summary.get("local_backup", {})
 
-            print(f"📊 Vertex AI RAG documents: {vertex_info.get('file_count', 0)}")
+            print(f"Vertex AI RAG documents: {vertex_info.get('file_count', 0)}")
             print(
-                f"📊 Local documents collected: {local_info.get('local_documents', 0)}"
+                f"Local documents collected: {local_info.get('local_documents', 0)}"
             )
-            print(f"📊 Queries processed: {stats.get('queries_processed', 0)}")
-            print(f"📊 Success rate: {stats.get('success_rate', 0):.1%}")
+            print(f"Queries processed: {stats.get('queries_processed', 0)}")
+            print(f"Success rate: {stats.get('success_rate', 0):.1%}")
 
             # Save report if requested
             if save_report:
                 filename = self.save_report(query, result, duration, context)
                 if filename:
-                    print(f"💾 Report saved to: {filename}")
+                    print(f"Report saved to: {filename}")
 
             return result
 
         except Exception as e:
-            print(f"❌ Research failed: {e}")
+            print(f"Research failed: {e}")
             return None
         
         finally:
@@ -386,10 +496,10 @@ class BasicResearchCLI:
             vertex_info = corpus_summary.get("vertex_ai_rag", {})
             local_info = corpus_summary.get("local_backup", {})
 
-            print(f"📊 Used Vertex AI RAG: {use_rag}")
-            print(f"📊 Vertex AI RAG documents: {vertex_info.get('file_count', 0)}")
+            print(f"Used Vertex AI RAG: {use_rag}")
+            print(f"Vertex AI RAG documents: {vertex_info.get('file_count', 0)}")
             print(
-                f"📊 Local documents available: {local_info.get('local_documents', 0)}"
+                f"Local documents available: {local_info.get('local_documents', 0)}"
             )
 
             # Save report if requested
@@ -398,12 +508,12 @@ class BasicResearchCLI:
                     f"REGENERATED: {query}", result, duration, regenerated=True
                 )
                 if filename:
-                    print(f"💾 Regenerated report saved to: {filename}")
+                    print(f"Regenerated report saved to: {filename}")
 
             return result
 
         except Exception as e:
-            print(f"❌ Summary regeneration failed: {e}")
+            print(f"Summary regeneration failed: {e}")
             return None
         
         finally:
@@ -485,7 +595,7 @@ class BasicResearchCLI:
     def show_corpus_info(self):
         """Display information about the current corpus"""
         if not self.agent:
-            print("❌ Agent not initialized")
+            print("Agent not initialized")
             return
 
         try:
@@ -511,7 +621,7 @@ class BasicResearchCLI:
                     print(f"    {domain}: {count}")
 
         except Exception as e:
-            print(f"❌ Failed to get corpus info: {e}")
+            print(f"Failed to get corpus info: {e}")
 
     async def interactive_mode(self, debug_mode: bool = False):
         """Run in interactive mode with clarification support"""
@@ -572,7 +682,7 @@ class BasicResearchCLI:
 
                 if result:
                     # Ask if user wants to see the report
-                    show = input("\n👁️ Display report? (y/n): ").lower()
+                    show = input("\nDisplay report? (y/n): ").lower()
                     if show in ["y", "yes"]:
                         self.display_report(result)
 
@@ -581,7 +691,7 @@ class BasicResearchCLI:
             except KeyboardInterrupt:
                 break
             except Exception as e:
-                print(f"❌ Error: {e}")
+                print(f"Error: {e}")
 
         # Display session summary using event subscriber
         if self.event_subscriber:
@@ -677,10 +787,10 @@ def main():
         print("🔧 Checking configuration...")
         try:
             cli.config._validate_config()
-            print("✅ Configuration is valid")
+            print("Configuration is valid")
             return 0
         except Exception as e:
-            print(f"❌ Configuration has issues: {e}")
+            print(f"Configuration has issues: {e}")
             return 1
 
     # Setup agent
@@ -696,7 +806,7 @@ def main():
     if args.regenerate:
         try:
             if not args.quiet:
-                print("🔄 Deep Research Agent - Regenerate Summary")
+                print("Deep Research Agent - Regenerate Summary")
                 print("=" * 40)
 
             # Regenerate summary
@@ -723,7 +833,7 @@ def main():
             print("\n👋 Regeneration cancelled by user")
             return 1
         except Exception as e:
-            print(f"❌ Unexpected error: {e}")
+            print(f"Unexpected error: {e}")
             if args.debug:
                 import traceback
 
@@ -733,7 +843,7 @@ def main():
     # Get query for regular research
     query = args.query or args.query
     if not query:
-        print("❌ No query provided")
+        print("No query provided")
         print("Use --help for usage information")
         return 1
 
@@ -762,7 +872,7 @@ def main():
         print("\n👋 Research cancelled by user")
         return 1
     except Exception as e:
-        print(f"❌ Unexpected error: {e}")
+        print(f"Unexpected error: {e}")
         if args.debug:
             import traceback
 
