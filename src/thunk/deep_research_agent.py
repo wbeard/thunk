@@ -122,11 +122,9 @@ class DeepResearchAgent:
                     self._emit('debug_message', "Using Vertex AI RAG for enhanced report synthesis")
                     self._emit('rag_synthesis_before', query)
                     # Create enhanced query that includes clarification context
-                    enhanced_query = query
                     context_section = ""
                     
                     if context:
-                        enhanced_query = f"{query}\n\nCLARIFICATION CONTEXT:\n{context}"
                         context_section = f"""
                     CLARIFICATION CONTEXT PROVIDED:
                     {context}
@@ -771,15 +769,22 @@ class DeepResearchAgent:
         logger.debug("Local corpus cleared")
         self._emit('debug_message', "Local corpus cleared")
 
-    def delete_vertex_corpus(self):
-        """Delete the Vertex AI RAG corpus (use with caution)"""
+    def delete_vertex_corpus(self) -> bool:
+        """Delete the Vertex AI RAG corpus (use with caution)
+        
+        Returns:
+            bool: True if deletion was successful, False otherwise
+        """
         try:
-            self.rag_engine.delete_corpus()
-            logger.debug("Vertex AI RAG corpus deleted")
-            self._emit('debug_message', "Vertex AI RAG corpus deleted")
+            success = self.rag_engine.delete_corpus()
+            if success:
+                logger.debug("Vertex AI RAG corpus deleted")
+                self._emit('debug_message', "Vertex AI RAG corpus deleted")
+            return success
         except Exception as e:
             logger.error(f"Failed to delete Vertex AI corpus: {e}")
             self._emit('error', e, "delete_vertex_corpus")
+            return False
 
     def export_corpus(self, filepath: str):
         """Export local corpus to JSON file"""

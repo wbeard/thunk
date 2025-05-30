@@ -37,6 +37,7 @@ class VertexRagEngineAPI:
         project_id: str,
         location: str = "us-central1",
         corpus_display_name: str = "default_corpus",
+        lazy_corpus_init: bool = False,
     ):
         """
         Initialize Vertex AI RAG Engine API
@@ -57,7 +58,8 @@ class VertexRagEngineAPI:
         self.base_url = f"https://{location}-aiplatform.googleapis.com/v1/projects/{project_id}/locations/{location}"
 
         # Initialize or get existing corpus
-        self._initialize_corpus()
+        if not lazy_corpus_init:
+            self._initialize_corpus()
 
     def _initialize_corpus(self):
         """Initialize or retrieve existing RAG corpus"""
@@ -337,15 +339,42 @@ class VertexRagEngineAPI:
             logger.error(f"Failed to generate with RAG: {e}")
             return ""
 
-    def delete_corpus(self):
-        """Delete the RAG corpus"""
+    def corpus_exists(self, display_name: str) -> bool:
+        """
+        Check if a corpus with the given display name exists
+        
+        Args:
+            display_name: The display name to check
+            
+        Returns:
+            True if corpus exists, False otherwise
+        """
+        try:
+            # Try to get the corpus by name - if it exists, this will succeed
+            rag.get_corpus(name=f"projects/{self.project_id}/locations/{self.location}/ragCorpora/{display_name}")
+            return True
+        except Exception:
+            # If corpus doesn't exist, get_corpus will raise an exception
+            return False
+
+    def delete_corpus(self) -> bool:
+        """Delete the RAG corpus
+        
+        Returns:
+            bool: True if deletion was successful, False otherwise
+        """
         if self.corpus:
             try:
                 rag.delete_corpus(name=self.corpus.name)
-                logger.info(f"Deleted corpus: {self.corpus.name}")
+                logger.debug(f"Deleted corpus: {self.corpus.name}")
                 self.corpus = None
+                return True
             except Exception as e:
                 logger.error(f"Failed to delete corpus: {e}")
+                return False
+        else:
+            logger.warning("No corpus to delete")
+            return False
 
     def import_files_from_paths(
         self, file_paths: List[str], chunk_size: int = 1024, chunk_overlap: int = 200

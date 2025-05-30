@@ -8,6 +8,7 @@ import asyncio
 import sys
 import argparse
 import time
+import random
 from datetime import datetime
 from typing import Optional
 
@@ -18,8 +19,36 @@ from .deep_research_agent import (
 )
 from .types import ResearchConfig
 from .state_logger import ResearchEventLogger
+from .vertex_rag_engine import VertexRagEngineAPI
 
 load_dotenv()
+
+
+def generate_random_corpus_name() -> str:
+    """Generate a random corpus name using adjective-noun combinations"""
+    adjectives = [
+        "agile", "bold", "calm", "deep", "eager", "fast", "gentle", "happy", "intense", "jolly",
+        "keen", "lively", "merry", "noble", "optimistic", "peaceful", "quick", "radiant", "swift", "tranquil",
+        "unique", "vibrant", "wise", "xenial", "youthful", "zealous", "ancient", "brilliant", "clever", "dynamic",
+        "elegant", "fierce", "graceful", "humble", "innovative", "joyful", "kind", "luminous", "majestic", "nimble",
+        "organic", "precise", "quiet", "robust", "serene", "thoughtful", "uplifting", "vivid", "warm", "xylem",
+        "young", "zestful", "amber", "blue", "crimson", "dark", "emerald", "fiery", "golden", "icy",
+        "jade", "lavender", "mystic", "neon", "orange", "purple", "royal", "silver", "teal", "ultra"
+    ]
+    
+    nouns = [
+        "panda", "tiger", "eagle", "dolphin", "fox", "wolf", "bear", "lion", "owl", "deer",
+        "hawk", "shark", "whale", "penguin", "falcon", "jaguar", "lynx", "otter", "raven", "swan",
+        "bicycle", "rocket", "compass", "telescope", "camera", "piano", "guitar", "violin", "drums", "flute",
+        "mountain", "river", "forest", "ocean", "valley", "canyon", "meadow", "glacier", "volcano", "desert",
+        "crystal", "diamond", "ruby", "sapphire", "emerald", "pearl", "opal", "quartz", "amber", "jade",
+        "thunder", "lightning", "storm", "rainbow", "sunrise", "sunset", "aurora", "comet", "meteor", "nebula",
+        "galaxy", "planet", "star", "moon", "sun", "cosmos", "orbit", "void", "dimension", "universe"
+    ]
+    
+    adjective = random.choice(adjectives)
+    noun = random.choice(nouns)
+    return f"{adjective}-{noun}"
 
 
 class CLIEventSubscriber:
@@ -319,9 +348,44 @@ class BasicResearchCLI:
 
     def __init__(self, corpus_display_name: str = None):
         self.agent = None
+        
+        # Generate random corpus name if none provided
+        if not corpus_display_name:
+            corpus_display_name = self._generate_unique_corpus_name()
+        
         self.config = ResearchConfig(corpus_display_name=corpus_display_name)
         self.event_subscriber = None
         self.logger_subscriber = None
+
+    def _generate_unique_corpus_name(self) -> str:
+        """Generate a unique corpus name that doesn't already exist"""
+        try:
+            # Create a temporary config to get project details for checking
+            temp_config = ResearchConfig()
+            
+            # Create temporary VertexRagEngineAPI instance for checking existence
+            temp_rag_engine = VertexRagEngineAPI(
+                project_id=temp_config.project_id,
+                location=temp_config.location,
+                lazy_corpus_init=True
+            )
+            
+            # Generate names until we find one that doesn't exist
+            max_attempts = 100  # Prevent infinite loop
+            for attempt in range(max_attempts):
+                candidate_name = generate_random_corpus_name()
+                if not temp_rag_engine.corpus_exists(candidate_name):
+                    return candidate_name
+            
+            # If we somehow can't find a unique name after 100 attempts,
+            # fall back to a timestamped name
+            import time
+            return f"research-corpus-{int(time.time())}"
+            
+        except Exception as e:
+            # If there's any error with uniqueness checking, fall back to random name
+            print(f"⚠️ Could not check corpus uniqueness ({e}), using random name")
+            return generate_random_corpus_name()
 
     def setup_agent(self, debug_mode: bool = False, quiet_mode: bool = False) -> bool:
         """Initialize the research agent with Vertex AI RAG"""
@@ -623,6 +687,36 @@ class BasicResearchCLI:
         except Exception as e:
             print(f"Failed to get corpus info: {e}")
 
+    def delete_corpus(self) -> bool:
+        """Delete the current corpus with confirmation"""
+        if not self.agent:
+            print("Agent not initialized")
+            return False
+
+        try:
+            corpus_name = self.config.corpus_display_name
+            print(f"⚠️  About to delete corpus: '{corpus_name}'")
+            print("This action cannot be undone and will permanently remove all documents from the corpus.")
+            
+            confirmation = input(f"Type '{corpus_name}' to confirm deletion: ").strip()
+            
+            if confirmation == corpus_name:
+                print("🗑️  Deleting corpus...")
+                success = self.agent.delete_vertex_corpus()
+                if success:
+                    print(f"✅ Successfully deleted corpus: '{corpus_name}'")
+                    return True
+                else:
+                    print(f"❌ Failed to delete corpus: '{corpus_name}'")
+                    return False
+            else:
+                print("❌ Deletion cancelled - corpus name did not match")
+                return False
+                
+        except Exception as e:
+            print(f"Failed to delete corpus: {e}")
+            return False
+
     async def interactive_mode(self, debug_mode: bool = False):
         """Run in interactive mode with clarification support"""
         print(f"🔬 Deep Research Agent - Interactive Mode (Vertex AI RAG)")
@@ -631,8 +725,9 @@ class BasicResearchCLI:
         print("  <query>                    - Run research with clarification")
         print("  regenerate <query>         - Regenerate summary from existing corpus")
         print("  regenerate-no-rag <query>  - Regenerate without Vertex AI RAG")
-        print("  corpus-info               - Show corpus information")
-        print("  quit                      - Exit")
+        print("  corpus-info                - Show corpus information")
+        print("  delete-corpus              - Delete current corpus (closes session)")
+        print("  quit                       - Exit")
         print()
 
         session_count = 0
@@ -640,13 +735,21 @@ class BasicResearchCLI:
         while True:
             try:
                 # Get query from user
-                user_input = input("🔍 Research Query: ").strip()
+                user_input = input("> ").strip()
 
                 if user_input.lower() in ["quit", "exit", "q"]:
                     break
 
                 if user_input.lower() == "corpus-info":
                     self.show_corpus_info()
+                    continue
+                    
+                if user_input.lower() == "delete-corpus":
+                    success = self.delete_corpus()
+                    if success:
+                        print("\n🔒 Session ending due to corpus deletion.")
+                        print("Commands like 'regenerate' will no longer work.")
+                        break
                     continue
 
                 if not user_input:
@@ -770,6 +873,9 @@ def main():
     parser.add_argument(
         "--corpus", "-c", help="Name of the Vertex AI RAG corpus to use"
     )
+    parser.add_argument(
+        "--delete-corpus", "-D", help="Delete the specified corpus (requires corpus name)"
+    )
 
 
     # Debug options
@@ -796,6 +902,38 @@ def main():
     # Setup agent
     if not cli.setup_agent(debug_mode=args.debug, quiet_mode=args.quiet):
         return 1
+
+    # Delete corpus mode
+    if args.delete_corpus:
+        if not args.corpus:
+            print("Error: --delete-corpus requires --corpus to specify which corpus to delete")
+            return 1
+        
+        if args.delete_corpus != args.corpus:
+            print(f"Error: --delete-corpus value '{args.delete_corpus}' must match --corpus value '{args.corpus}'")
+            return 1
+            
+        try:
+            print("🗑️  Deep Research Agent - Delete Corpus")
+            print("=" * 40)
+            
+            success = cli.delete_corpus()
+            if success:
+                print("\\n✅ Corpus deletion completed successfully")
+                return 0
+            else:
+                print("\\n❌ Corpus deletion failed")
+                return 1
+                
+        except KeyboardInterrupt:
+            print("\\n👋 Deletion cancelled by user")
+            return 1
+        except Exception as e:
+            print(f"Unexpected error: {e}")
+            if args.debug:
+                import traceback
+                traceback.print_exc()
+            return 1
 
     # Interactive mode
     if args.interactive:
