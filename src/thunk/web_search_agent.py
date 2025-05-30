@@ -3,12 +3,13 @@ import requests
 from typing import List
 
 from .types import SearchResult
+from .search_provider import SearchProvider
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
-class WebSearchAgent:
+class WebSearchAgent(SearchProvider):
     """Handles web search operations"""
 
     def __init__(self, serpapi_key: str):
@@ -46,6 +47,10 @@ class WebSearchAgent:
         except Exception as e:
             logger.error(f"Search failed for query '{query}': {e}")
             return []
+
+    def provider_name(self) -> str:
+        """Return the name of this search provider"""
+        return "web"
 
     def _extract_domain(self, url: str) -> str:
         """Extract domain from URL"""

@@ -9,8 +9,9 @@ A sophisticated AI-powered research assistant that autonomously performs multi-s
 Thunk replicates advanced research capabilities similar to Google's Gemini Deep Research, providing:
 
 - **Autonomous Research Planning** - Breaks down complex queries into structured research steps
-- **Intelligent Web Search** - Performs targeted searches with AI-powered quality filtering  
-- **Content Analysis** - Fetches and processes web pages, PDFs, and documents
+- **Multiple Search Providers** - Support for web search (SerpAPI) and academic papers (arXiv)
+- **Intelligent Content Filtering** - AI-powered quality filtering and relevance evaluation
+- **Content Analysis** - Fetches and processes web pages, PDFs, and academic papers
 - **Vertex AI RAG Integration** - Stores and manages research findings using Google's RAG engine
 - **Interactive CLI** - User-friendly command-line interface with clarification support
 - **Report Synthesis** - Generates comprehensive reports with proper citations
@@ -83,8 +84,10 @@ gcloud auth application-default login
 Create a `.env` file with your API keys:
 
 ```bash
-# Required
+# Required for web search (not needed for arXiv-only research)
 SERPAPI_KEY=your_serpapi_key_here
+
+# Always required
 GOOGLE_CLOUD_PROJECT=your_gcp_project_id
 
 # Optional (with defaults)
@@ -96,10 +99,11 @@ MODEL_NAME=gemini-2.5-flash-preview-05-20
 
 ### API Keys Setup
 
-**SerpAPI Key:**
+**SerpAPI Key (for web search):**
 1. Sign up at [SerpAPI](https://serpapi.com)
 2. Get your API key from the dashboard
 3. Add to `.env` file as `SERPAPI_KEY`
+4. **Note**: Not required if using `--search-provider arxiv` exclusively
 
 **Google Cloud Setup:**
 1. Create a Google Cloud Project
@@ -121,8 +125,11 @@ The CLI provides multiple ways to interact with the research agent:
 ### Basic Research Query
 
 ```bash
-# Simple research query
+# Simple web research query
 uv run thunk "Latest developments in quantum computing 2024"
+
+# Academic paper research using arXiv
+uv run thunk "quantum computing" --search-provider arxiv
 
 # With specific corpus and output options
 uv run thunk "AI safety research trends" --corpus my_research --output report.md --full
@@ -134,8 +141,11 @@ uv run thunk "research query" --quiet
 ### Interactive Mode
 
 ```bash
-# Start interactive session
+# Start interactive session with web search
 uv run thunk --interactive
+
+# Start interactive session with arXiv search
+uv run thunk --interactive --search-provider arxiv
 
 # Available commands in interactive mode:
 # <query>                     - Run research with clarification
@@ -178,6 +188,7 @@ uv run thunk "query" --corpus my_research_corpus
 | `--interactive` | `-i` | Run in interactive mode |
 | `--query` | `-q` | Research query (alternative to positional) |
 | `--regenerate` | `-r` | Regenerate from existing corpus |
+| `--search-provider` | `-s` | Search provider: `web` (default) or `arxiv` |
 | `--output` | `-o` | Output file for report |
 | `--corpus` | `-c` | Name of Vertex AI RAG corpus to use |
 | `--no-save` | | Don't save report to file |
@@ -193,11 +204,17 @@ uv run thunk "query" --corpus my_research_corpus
 # First-time setup
 uv run thunk --check-config
 
-# Interactive research session
+# Interactive research session with web search
 uv run thunk --interactive
 
-# Quick research with custom corpus
+# Academic research session with arXiv
+uv run thunk --interactive --search-provider arxiv
+
+# Quick web research with custom corpus
 uv run thunk "AI trends 2024" --corpus ai_research --debug
+
+# Academic paper research
+uv run thunk "machine learning quantum computing" --search-provider arxiv
 
 # Regenerate previous research
 uv run thunk --regenerate "previous query" --corpus ai_research
@@ -211,7 +228,7 @@ The following environment variables can be configured:
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
-| `SERPAPI_KEY` | ✅ Yes | - | SerpAPI key for web search |
+| `SERPAPI_KEY` | Only for web search | - | SerpAPI key for web search |
 | `GOOGLE_CLOUD_PROJECT` | ✅ Yes | - | Google Cloud project ID |
 | `VERTEX_AI_LOCATION` | No | `us-central1` | Vertex AI region |
 | `RAG_CORPUS_NAME` | No | `research_corpus_6` | Name for RAG corpus |
@@ -226,7 +243,10 @@ The `ResearchConfig` class automatically loads and validates configuration:
 from src.thunk.types import ResearchConfig
 
 # Automatically loads from environment variables
-config = ResearchConfig(corpus_display_name="my_corpus")
+config = ResearchConfig(corpus_display_name="my_corpus", search_provider="web")
+
+# For arXiv-only research (no SERPAPI_KEY needed)
+config_arxiv = ResearchConfig(corpus_display_name="my_corpus", search_provider="arxiv")
 
 # Validates required configuration
 try:
@@ -240,7 +260,9 @@ except ValueError as e:
 
 **Common configuration issues:**
 
-1. **Missing API Keys**: Ensure `SERPAPI_KEY` and `GOOGLE_CLOUD_PROJECT` are set
+1. **Missing API Keys**: 
+   - For web search: Ensure `SERPAPI_KEY` and `GOOGLE_CLOUD_PROJECT` are set
+   - For arXiv search: Only `GOOGLE_CLOUD_PROJECT` is required
 2. **Authentication**: Run `gcloud auth application-default login`
 3. **Corpus Name**: Provide via `--corpus` argument or `RAG_CORPUS_NAME` environment variable
 
@@ -248,18 +270,53 @@ except ValueError as e:
 # Debug configuration issues
 uv run thunk --check-config
 
+# Check configuration for arXiv search (no SerpAPI needed)
+uv run thunk --check-config --search-provider arxiv
+
 # Example error messages:
-# "Missing required configuration: SERPAPI_KEY, GOOGLE_CLOUD_PROJECT"
+# "Missing required configuration: SERPAPI_KEY" (for web search)
+# "Missing required configuration: GOOGLE_CLOUD_PROJECT"
 # "Missing required configuration: --corpus argument or RAG_CORPUS_NAME environment variable"
+```
+
+## 🔍 Search Providers
+
+Thunk supports multiple search providers through a pluggable architecture:
+
+### Web Search (Default)
+- **Provider**: SerpAPI integration
+- **Content**: Web pages, news articles, blog posts
+- **Requirements**: `SERPAPI_KEY` environment variable
+- **Usage**: `--search-provider web` (default)
+
+### Academic Papers (arXiv)
+- **Provider**: arXiv.org academic repository
+- **Content**: Research papers, preprints, academic publications
+- **Requirements**: No additional API keys needed
+- **Usage**: `--search-provider arxiv`
+
+### Example Usage Patterns
+
+```bash
+# General web research
+uv run thunk "latest AI developments 2024" --search-provider web
+
+# Academic research
+uv run thunk "transformer architectures" --search-provider arxiv
+
+# Mixed research (use different providers in separate sessions)
+uv run thunk "quantum computing applications" --search-provider web --corpus quantum_web
+uv run thunk "quantum computing theory" --search-provider arxiv --corpus quantum_papers
 ```
 
 ## 🤝 Contributing
 
 The system is designed to be extensible:
-- Add new content fetchers for different file types
-- Implement custom RAG engines beyond Vertex AI
-- Create specialized event subscribers for different use cases
-- Extend the CLI with additional features
+- **Add new search providers** - Implement the `SearchProvider` interface
+- **Add new content fetchers** - Support different file types
+- **Implement custom RAG engines** - Beyond Vertex AI
+- **Create specialized event subscribers** - For different use cases
+- **Extend the CLI** - With additional features
 
 ## 📄 License
 

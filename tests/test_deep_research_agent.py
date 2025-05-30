@@ -64,18 +64,21 @@ class MockDocument:
 def mock_agent():
     """Create a mock DeepResearchAgent for testing"""
     with patch('src.thunk.deep_research_agent.GeminiLLM') as mock_llm_class, \
-         patch('src.thunk.deep_research_agent.WebSearchAgent') as mock_search_class, \
          patch('src.thunk.deep_research_agent.ContentFetcher') as mock_fetcher_class, \
          patch('src.thunk.deep_research_agent.VertexRagEngineAPI') as mock_rag_class:
         
         # Setup mocks
         mock_llm_class.return_value = MockGeminiLLM()
-        mock_search_class.return_value = Mock()
         mock_fetcher_class.return_value = Mock()
         mock_rag_class.return_value = Mock()
         
+        # Create mock search provider
+        mock_search_provider = Mock()
+        mock_search_provider.search.return_value = []
+        mock_search_provider.provider_name.return_value = "web"
+        
         agent = DeepResearchAgent(
-            serpapi_key="test_key",
+            search_provider=mock_search_provider,
             project_id="test_project",
             location="us-central1"
         )
@@ -149,7 +152,7 @@ class TestDeepResearchAgent:
             MockSearchResult("Article 2", "https://test2.com", 2)
         ]
         
-        mock_agent.search_agent.search.return_value = mock_search_results
+        mock_agent.search_provider.search.return_value = mock_search_results
         mock_agent.content_fetcher.fetch_content.return_value = "Test content"
         
         # Mock the fetch and process method to return documents
@@ -157,7 +160,7 @@ class TestDeepResearchAgent:
             results = await mock_agent._search_and_analyze("test query", "test focus")
             
             assert len(results) <= 2  # Should process up to top 3 results
-            mock_agent.search_agent.search.assert_called_once_with("test query")
+            mock_agent.search_provider.search.assert_called_once_with("test query")
     
     @pytest.mark.asyncio
     async def test_execute_focused_research_base_case(self, mock_agent):
@@ -380,7 +383,7 @@ class TestDeepResearchAgentIntegration:
         
         # Mock search results
         mock_search_results = [MockSearchResult()]
-        mock_agent.search_agent.search.return_value = mock_search_results
+        mock_agent.search_provider.search.return_value = mock_search_results
         
         # Mock content fetching
         mock_agent.content_fetcher.fetch_content.return_value = "Test content"

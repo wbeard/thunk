@@ -20,6 +20,8 @@ from .deep_research_agent import (
 from .types import ResearchConfig
 from .state_logger import ResearchEventLogger
 from .vertex_rag_engine import VertexRagEngineAPI
+from .web_search_agent import WebSearchAgent
+from .arxiv_search_agent import ArxivSearchAgent
 
 load_dotenv()
 
@@ -346,14 +348,14 @@ class CLIEventSubscriber:
 class BasicResearchCLI:
     """Simple command-line research interface with Vertex AI RAG support"""
 
-    def __init__(self, corpus_display_name: str = None):
+    def __init__(self, corpus_display_name: str = None, search_provider: str = "web"):
         self.agent = None
         
         # Generate random corpus name if none provided
         if not corpus_display_name:
             corpus_display_name = self._generate_unique_corpus_name()
         
-        self.config = ResearchConfig(corpus_display_name=corpus_display_name)
+        self.config = ResearchConfig(corpus_display_name=corpus_display_name, search_provider=search_provider)
         self.event_subscriber = None
         self.logger_subscriber = None
 
@@ -387,7 +389,7 @@ class BasicResearchCLI:
             print(f"⚠️ Could not check corpus uniqueness ({e}), using random name")
             return generate_random_corpus_name()
 
-    def setup_agent(self, debug_mode: bool = False, quiet_mode: bool = False) -> bool:
+    def setup_agent(self, debug_mode: bool = False, quiet_mode: bool = False, search_provider: str = "web") -> bool:
         """Initialize the research agent with Vertex AI RAG"""
         try:
             if not quiet_mode:
@@ -403,9 +405,15 @@ class BasicResearchCLI:
                 debug_mode=debug_mode, quiet_mode=quiet_mode
             )
 
+            # Create search provider based on configuration
+            if search_provider == "arxiv":
+                search_agent = ArxivSearchAgent()
+            else:  # default to web
+                search_agent = WebSearchAgent(self.config.serpapi_key)
+
             # Create agent with Vertex AI configuration
             self.agent = DeepResearchAgent(
-                serpapi_key=self.config.serpapi_key,
+                search_provider=search_agent,
                 project_id=self.config.project_id,
                 location=self.config.location,
                 corpus_display_name=self.config.corpus_display_name,
@@ -422,6 +430,9 @@ class BasicResearchCLI:
                     f"📁 Using Vertex AI RAG corpus: {self.config.corpus_display_name}"
                 )
                 print(
+                    f"🔍 Search provider: {search_provider}"
+                )
+                print(
                     f"🌍 Project: {self.config.project_id}, Location: {self.config.location}"
                 )
             return True
@@ -431,7 +442,8 @@ class BasicResearchCLI:
             if not quiet_mode:
                 print("Check your environment variables:")
                 print("  - GEMINI_API_KEY")
-                print("  - SERPAPI_KEY")
+                if search_provider == "web":
+                    print("  - SERPAPI_KEY (required for web search)")
                 print("  - GOOGLE_CLOUD_PROJECT")
                 print("  - VERTEX_AI_LOCATION (optional)")
                 print("And provide the RAG corpus name via:")
@@ -721,6 +733,7 @@ class BasicResearchCLI:
         """Run in interactive mode with clarification support"""
         print(f"🔬 Deep Research Agent - Interactive Mode (Vertex AI RAG)")
         print("=" * 60)
+        print(f"🔍 Search Provider: {self.config.search_provider}")
         print("Commands:")
         print("  <query>                    - Run research with clarification")
         print("  regenerate <query>         - Regenerate summary from existing corpus")
@@ -824,10 +837,11 @@ def main():
         epilog="""
                 Examples:
                   %(prog)s "Latest developments in quantum computing"
-                  %(prog)s --interactive
+                  %(prog)s --interactive --search-provider arxiv
                   %(prog)s "AI safety research 2024" --no-save --full
                   %(prog)s --query "Climate change solutions" --output report.md
-                  %(prog)s --regenerate "quantum computing trends"
+                  %(prog)s --regenerate "quantum computing trends" --search-provider web
+                  %(prog)s "machine learning papers" --search-provider arxiv
         """,
     )
 
@@ -881,6 +895,14 @@ def main():
         "--delete-corpus", "-D", help="Delete the specified corpus (requires corpus name)"
     )
 
+    # Search provider configuration
+    parser.add_argument(
+        "--search-provider", "-s", 
+        choices=["web", "arxiv"], 
+        default="web",
+        help="Search provider to use (default: web)"
+    )
+
 
     # Debug options
     parser.add_argument(
@@ -890,7 +912,7 @@ def main():
     args = parser.parse_args()
 
     # Initialize CLI
-    cli = BasicResearchCLI(corpus_display_name=args.corpus)
+    cli = BasicResearchCLI(corpus_display_name=args.corpus, search_provider=args.search_provider)
 
     # Check configuration only
     if args.check_config:
@@ -904,7 +926,7 @@ def main():
             return 1
 
     # Setup agent
-    if not cli.setup_agent(debug_mode=args.debug, quiet_mode=args.quiet):
+    if not cli.setup_agent(debug_mode=args.debug, quiet_mode=args.quiet, search_provider=args.search_provider):
         return 1
 
     # Delete corpus mode

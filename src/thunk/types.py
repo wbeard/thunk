@@ -38,10 +38,11 @@ class ResearchPlan:
 class ResearchConfig:
     """Configuration for the research agent"""
 
-    def __init__(self, corpus_display_name: str = None):
+    def __init__(self, corpus_display_name: str = None, search_provider: str = "web"):
         # Load from environment variables
         # self.gemini_api_key = os.getenv('GEMINI_API_KEY')
         self.serpapi_key = os.getenv("SERPAPI_KEY")
+        self.search_provider = search_provider
 
         # Vertex AI configuration
         self.project_id = os.getenv("GOOGLE_CLOUD_PROJECT")
@@ -59,7 +60,8 @@ class ResearchConfig:
         """Validate that required configuration is present"""
         missing = []
 
-        if not self.serpapi_key:
+        # Only require SERPAPI_KEY for web search provider
+        if self.search_provider == "web" and not self.serpapi_key:
             missing.append("SERPAPI_KEY")
         if not self.project_id:
             missing.append("GOOGLE_CLOUD_PROJECT")

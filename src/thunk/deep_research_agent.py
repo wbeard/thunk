@@ -10,7 +10,7 @@ from .vertex_rag_engine import VertexRagEngineAPI
 from .types import SearchResult, Document
 from .gemini_llm import GeminiLLM
 from .content_fetcher import ContentFetcher
-from .web_search_agent import WebSearchAgent
+from .search_provider import SearchProvider
 
 logging.getLogger("google_genai.models").setLevel(logging.ERROR)
 logging.getLogger("httpx").setLevel(logging.ERROR)
@@ -25,7 +25,7 @@ class DeepResearchAgent:
 
     def __init__(
         self,
-        serpapi_key: str,
+        search_provider: SearchProvider,
         project_id: str,
         location: str = "us-central1",
         corpus_display_name: str = "research_corpus",
@@ -38,7 +38,7 @@ class DeepResearchAgent:
         Initialize the Deep Research Agent with Vertex AI RAG
 
         Args:
-            serpapi_key: API key for SerpAPI web search
+            search_provider: Search provider instance (WebSearchAgent or ArxivSearchAgent)
             project_id: Google Cloud project ID
             location: Vertex AI location (default: us-central1)
             corpus_display_name: Name for the RAG corpus
@@ -48,7 +48,7 @@ class DeepResearchAgent:
             fetch_delay: Delay between fetch operations in seconds (default: 0.05)
         """
         self.llm = GeminiLLM(project_name=project_id, location=location)
-        self.search_agent = WebSearchAgent(serpapi_key)
+        self.search_provider = search_provider
         self.content_fetcher = ContentFetcher()
 
         # Initialize Vertex AI RAG Engine
@@ -556,7 +556,7 @@ class DeepResearchAgent:
                     url=result.url,
                     content=content,
                     summary=summary,
-                    source_type="web",
+                    source_type=self.search_provider.provider_name(),
                     date_collected=datetime.now().isoformat(),
                     relevance_score=result.relevance_score,
                     metadata={
@@ -592,7 +592,7 @@ class DeepResearchAgent:
             # Step 1: Web search
             self._emit('search_before', query)
 
-            search_results = self.search_agent.search(query)
+            search_results = self.search_provider.search(query)
 
             if not search_results:
                 self._emit('search_no_results')
