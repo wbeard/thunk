@@ -2,6 +2,8 @@
 
 A sophisticated AI-powered research assistant that autonomously performs multi-step web research and synthesizes findings into comprehensive reports using Google's Vertex AI and Gemini models.
 
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/wbeard/thunk)
+
 ## 🎯 Overview
 
 Thunk replicates advanced research capabilities similar to Google's Gemini Deep Research, providing:
