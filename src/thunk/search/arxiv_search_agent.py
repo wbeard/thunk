@@ -1,8 +1,7 @@
 import logging
 from typing import List
-from urllib.parse import urlparse
 
-from .types import SearchResult
+from ..types import SearchResult
 from .search_provider import SearchProvider
 from arxiv import Client, Search, SortCriterion
 
@@ -21,9 +20,7 @@ class ArxivSearchAgent(SearchProvider):
         try:
             # Create arXiv search object
             arxiv_search = Search(
-                query=query,
-                max_results=num_results,
-                sort_by=SortCriterion.Relevance
+                query=query, max_results=num_results, sort_by=SortCriterion.Relevance
             )
 
             # Execute search
@@ -32,7 +29,9 @@ class ArxivSearchAgent(SearchProvider):
                 search_result = SearchResult(
                     title=result.title,
                     url=result.entry_id,
-                    snippet=result.summary[:300] + "..." if len(result.summary) > 300 else result.summary,
+                    snippet=result.summary[:300] + "..."
+                    if len(result.summary) > 300
+                    else result.summary,
                     domain=self._extract_domain(result.entry_id),
                     rank=i,
                 )

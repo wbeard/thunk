@@ -2,7 +2,7 @@ import logging
 import requests
 from typing import List
 
-from .types import SearchResult
+from ..types import SearchResult
 from .search_provider import SearchProvider
 
 logging.basicConfig(level=logging.INFO)

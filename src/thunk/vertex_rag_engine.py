@@ -14,6 +14,7 @@ logger = logging.getLogger(__name__)
 logging.getLogger("google_genai.models").setLevel(logging.ERROR)
 logging.getLogger("httpx").setLevel(logging.ERROR)
 
+
 @dataclass
 class Document:
     """Document class compatible with the original interface"""
@@ -342,16 +343,18 @@ class VertexRagEngineAPI:
     def corpus_exists(self, display_name: str) -> bool:
         """
         Check if a corpus with the given display name exists
-        
+
         Args:
             display_name: The display name to check
-            
+
         Returns:
             True if corpus exists, False otherwise
         """
         try:
             # Try to get the corpus by name - if it exists, this will succeed
-            rag.get_corpus(name=f"projects/{self.project_id}/locations/{self.location}/ragCorpora/{display_name}")
+            rag.get_corpus(
+                name=f"projects/{self.project_id}/locations/{self.location}/ragCorpora/{display_name}"
+            )
             return True
         except Exception:
             # If corpus doesn't exist, get_corpus will raise an exception
@@ -359,7 +362,7 @@ class VertexRagEngineAPI:
 
     def delete_corpus(self) -> bool:
         """Delete the RAG corpus
-        
+
         Returns:
             bool: True if deletion was successful, False otherwise
         """

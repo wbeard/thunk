@@ -33,7 +33,7 @@ class ContentFetcher:
             else:
                 return self._extract_html_text(response.text)
 
-        except Exception as e:
+        except Exception:
             return ""
 
     def _extract_html_text(self, html: str) -> str:

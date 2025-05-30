@@ -69,6 +69,4 @@ class ResearchConfig:
             missing.append("--corpus argument or RAG_CORPUS_NAME environment variable")
 
         if missing:
-            raise ValueError(
-                f"Missing required configuration: {', '.join(missing)}"
-            )
+            raise ValueError(f"Missing required configuration: {', '.join(missing)}")
