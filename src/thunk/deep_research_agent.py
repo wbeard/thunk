@@ -405,7 +405,7 @@ class DeepResearchAgent:
             # Step 3: Execute research plan
             all_documents = existing_docs.copy()
 
-            for step_num, research_step in enumerate(research_plan.steps, 1):
+            for step_num, research_step in enumerate(research_plan.steps):
                 self._emit('research_step_before', step_num, research_step)
                 logger.debug(f"Executing step {step_num}: {research_step}")
 

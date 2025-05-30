@@ -796,14 +796,18 @@ class BasicResearchCLI:
             except Exception as e:
                 print(f"Error: {e}")
 
-        # Display session summary using event subscriber
-        if self.event_subscriber:
-            self.event_subscriber.display_session_summary()
+        # Display session summary using event subscriber - wrap in try-except for graceful exit
+        try:
+            if self.event_subscriber:
+                self.event_subscriber.display_session_summary()
 
-        print(
-            f"\n👋 Interactive session ended. Completed {session_count} research queries."
-        )
-        print("🗄️ Documents remain stored in Vertex AI RAG corpus for future sessions.")
+            print(
+                f"\n👋 Interactive session ended. Completed {session_count} research queries."
+            )
+            print("🗄️ Documents remain stored in Vertex AI RAG corpus for future sessions.")
+        except KeyboardInterrupt:
+            # User pressed Ctrl+C during cleanup - exit silently
+            pass
 
     async def interactive_mode_async(self, debug_mode: bool = False):
         """Async wrapper for interactive mode to handle async research calls"""
@@ -937,7 +941,11 @@ def main():
 
     # Interactive mode
     if args.interactive:
-        asyncio.run(cli.interactive_mode(debug_mode=args.debug))
+        try:
+            asyncio.run(cli.interactive_mode(debug_mode=args.debug))
+        except KeyboardInterrupt:
+            # Handle Ctrl+C gracefully - don't show stacktrace
+            print("\n👋 Goodbye!")
         return 0
 
     # Regenerate mode
